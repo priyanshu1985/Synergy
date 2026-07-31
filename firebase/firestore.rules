@@ -1,0 +1,19 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Requests collection security rules
+    match /requests/{requestId} {
+      // Anyone (anonymous citizens) can submit SOS distress calls
+      allow create: if true;
+      
+      // Responders and clients can read SOS status updates
+      allow read: if true;
+      
+      // Responders can update status (dispatched, rescued)
+      allow update: if true;
+    }
+
+  }
+}
