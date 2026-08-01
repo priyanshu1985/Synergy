@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -12,6 +13,7 @@ const firebaseConfig = {
 
 let app;
 let db = null;
+let auth = null;
 
 if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
   console.warn(
@@ -21,10 +23,11 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
   try {
     app = initializeApp(firebaseConfig);
     db = getFirestore(app);
+    auth = getAuth(app);
   } catch (err) {
     console.error('Failed to initialize Firebase client:', err);
   }
 }
 
-export { db };
+export { db, auth };
 
