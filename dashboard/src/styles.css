@@ -1254,3 +1254,62 @@ html, body {
     display: none;
   }
 }
+
+/* Facility Registration Modal Styles */
+.register-facility-btn {
+  width: 100%;
+  padding: 10px 12px;
+  background: #2563eb;
+  border: 1px solid #2563eb;
+  border-radius: 8px;
+  color: white;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  margin-bottom: 14px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  transition: opacity 0.2s ease;
+}
+
+.register-facility-btn:hover {
+  opacity: 0.9;
+}
+
+.register-modal {
+  max-width: 500px !important;
+}
+
+.register-modal label {
+  display: block;
+  font-size: 11px;
+  color: #8fa1ba;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 4px;
+  font-weight: 700;
+}
+
+.register-modal select,
+.register-modal input {
+  transition: border-color 0.2s;
+}
+
+.register-modal select:focus,
+.register-modal input:focus {
+  border-color: #f2a93b !important;
+  outline: none;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  70% { transform: scale(1.03); opacity: 0.9; box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+  100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+.pulsing {
+  animation: pulse 1.6s infinite ease-in-out;
+}
+
+
