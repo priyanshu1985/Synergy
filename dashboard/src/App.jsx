@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { db } from './firebaseClient';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore';
@@ -38,12 +38,28 @@ function markerColor(r) {
   return '#8FA1BA';
 }
 
+function ChangeMapView({ center, zoom }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center) {
+      map.setView(center, zoom);
+    }
+  }, [center, zoom, map]);
+  return null;
+}
+
 export default function App() {
   const [requests, setRequests] = useState([]);
   const [filter, setFilter] = useState('all');
   const [loaded, setLoaded] = useState(false);
+  const [activeCenter, setActiveCenter] = useState(null);
+  const [activeZoom, setActiveZoom] = useState(5);
 
   useEffect(() => {
+    if (!db) {
+      setLoaded(true);
+      return;
+    }
     // Realtime — Firestore pushes new/changed documents straight to this dashboard.
     // No polling loop, no delay: a citizen's SOS shows up here within a second or two.
     const q = query(collection(db, 'requests'), orderBy('captured_at', 'desc'));
@@ -66,18 +82,51 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  const withLoc = requests.filter((r) => r.lat && r.lng);
+
+  useEffect(() => {
+    if (!activeCenter && withLoc.length > 0) {
+      setActiveCenter([withLoc[0].lat, withLoc[0].lng]);
+    }
+  }, [requests, activeCenter]);
+
   const updateStatus = async (id, status) => {
+    const timestampKey = status === 'dispatched' ? 'dispatched_at' : status === 'rescued' ? 'rescued_at' : null;
+    const timestampVal = new Date().toISOString();
+
     // optimistic update so the click feels instant even before Firestore echoes back
-    setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+    setRequests((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? {
+            ...r,
+            status,
+            ...(timestampKey ? { [timestampKey]: timestampVal } : {})
+          }
+          : r
+      )
+    );
+
+    if (!db) return;
+
     try {
-      await updateDoc(doc(db, 'requests', id), { status });
+      const updates = { status };
+      if (timestampKey) {
+        updates[timestampKey] = timestampVal;
+      }
+      await updateDoc(doc(db, 'requests', id), updates);
     } catch (err) {
       console.error('Error updating status in Firestore:', err);
     }
   };
 
+  const handleCardClick = (r) => {
+    if (r.lat && r.lng) {
+      setActiveCenter([r.lat, r.lng]);
+      setActiveZoom(14);
+    }
+  };
 
-  const withLoc = requests.filter((r) => r.lat && r.lng);
   const critical = requests.filter((r) => isCritical(r) && r.status !== 'rescued').length;
   const pending = requests.filter((r) => r.status === 'pending').length;
   const rescued = requests.filter((r) => r.status === 'rescued').length;
@@ -90,10 +139,6 @@ export default function App() {
     return b.captured_at - a.captured_at;
   });
 
-  const center = withLoc.length
-    ? [withLoc[0].lat, withLoc[0].lng]
-    : [20.5937, 78.9629]; // India-wide fallback view
-
   return (
     <div className="app">
       <aside className="sidebar">
@@ -101,6 +146,12 @@ export default function App() {
           <div className="title">Raahat — Response Dashboard</div>
           <div className="sub">Live requests from citizens on the ground</div>
         </header>
+
+        {!db && (
+          <div className="demo-banner">
+            ⚠️ Running in Offline Demo Mode (Firebase configuration is missing)
+          </div>
+        )}
 
         <div className="stats">
           <div className="stat danger"><div className="num">{critical}</div><div className="label">Critical</div></div>
@@ -124,7 +175,7 @@ export default function App() {
             </div>
           )}
           {sorted.map((r) => (
-            <div key={r.id} className={`request-card sit-${r.situation} status-${r.status}`}>
+            <div key={r.id} className={`request-card sit-${r.situation} status-${r.status}`} onClick={() => handleCardClick(r)}>
               <div className="row1">
                 <span className="name">{r.name} · {r.people_count} people</span>
                 <span className="time">{new Date(r.captured_at).toLocaleTimeString()}</span>
@@ -153,8 +204,26 @@ export default function App() {
                 📍 {r.lat ? `${r.lat.toFixed(4)}, ${r.lng.toFixed(4)}` : 'No GPS captured'} · 📞 {r.phone}
               </div>
               <div className="actions">
-                <button className="primary" onClick={() => updateStatus(r.id, 'dispatched')}>Mark dispatched</button>
-                <button className="done" onClick={() => updateStatus(r.id, 'rescued')}>Mark rescued</button>
+                <button
+                  className="primary"
+                  disabled={r.status === 'dispatched' || r.status === 'rescued'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    updateStatus(r.id, 'dispatched');
+                  }}
+                >
+                  Mark dispatched
+                </button>
+                <button
+                  className="done"
+                  disabled={r.status === 'rescued'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    updateStatus(r.id, 'rescued');
+                  }}
+                >
+                  Mark rescued
+                </button>
               </div>
             </div>
           ))}
@@ -162,7 +231,8 @@ export default function App() {
       </aside>
 
       <div className="map-wrap">
-        <MapContainer center={center} zoom={5} style={{ height: '100%', width: '100%' }}>
+        <MapContainer center={activeCenter || [20.5937, 78.9629]} zoom={activeZoom} style={{ height: '100%', width: '100%' }}>
+          <ChangeMapView center={activeCenter} zoom={activeZoom} />
           <TileLayer
             attribution="&copy; OpenStreetMap contributors"
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
