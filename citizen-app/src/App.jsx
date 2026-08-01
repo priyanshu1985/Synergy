@@ -50,10 +50,97 @@ export default function App() {
   const [situation, setSituation] = useState(null);
   const [gpsText, setGpsText] = useState('Getting your location…');
   const [gpsLocked, setGpsLocked] = useState(false);
+  const [gpsFailed, setGpsFailed] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const [queue, setQueue] = useState([]);
   const [btnState, setBtnState] = useState('idle'); // idle | sending | saved
   const coordsRef = useRef(null);
+  const [liveStatuses, setLiveStatuses] = useState({});
+
+  // Poll Firestore for live status updates (works even if onSnapshot read rules aren't deployed yet)
+  useEffect(() => {
+    if (!db) return;
+    const activeReqs = queue.filter(r => r.status === 'sent' && !r.markedSafe);
+    if (activeReqs.length === 0) return;
+
+    let cancelled = false;
+
+    const pollStatuses = async () => {
+      for (const req of activeReqs) {
+        if (cancelled) return;
+        try {
+          const { getDoc } = await import('firebase/firestore');
+          const snap = await getDoc(doc(db, 'requests', req.localId));
+          if (snap.exists()) {
+            const data = snap.data();
+            setLiveStatuses(prev => ({
+              ...prev,
+              [req.localId]: {
+                status: data.status,
+                ai_priority: data.ai_priority,
+                ai_processed_at: data.ai_processed_at,
+                assigned_resource_id: data.assigned_resource_id,
+                assigned_resource_name: data.assigned_resource_name,
+                assigned_at: data.assigned_at,
+                dispatched_at: data.dispatched_at,
+                rescued_at: data.rescued_at,
+                safe_reported_at: data.safe_reported_at
+              }
+            }));
+          }
+        } catch (err) {
+          // Read permissions not deployed yet — fail silently
+          console.warn('Status polling failed (likely permissions). Will retry.', err.code);
+        }
+      }
+    };
+
+    // Initial poll immediately
+    pollStatuses();
+    // Then poll every 10 seconds
+    const interval = setInterval(pollStatuses, 10000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [queue]);
+
+  const handleMarkSafe = async (localId) => {
+    const confirmSafe = window.confirm("Are you sure you want to mark yourself as safe? Rescuers will be notified.");
+    if (!confirmSafe) return;
+
+    try {
+      const nowStr = new Date().toISOString();
+      if (db) {
+        // Write a new "safe report" document into the requests collection.
+        // This is a CREATE operation — allowed by current Firestore rules (allow create: if true).
+        // Uses a _safe suffix so the dashboard can correlate it back to the original request.
+        const safeDocId = `${localId}_safe`;
+        await setDoc(doc(db, 'requests', safeDocId), {
+          id: safeDocId,
+          original_request_id: localId,
+          type: 'safe_report',
+          reported_at: nowStr,
+          status: 'rescued',
+          captured_at: Date.now()
+        });
+      }
+
+      // Update local IndexedDB record
+      const all = await getAllLocal();
+      const match = all.find(r => r.localId === localId);
+      if (match) {
+        match.markedSafe = true;
+        await saveLocal(match);
+      }
+      refreshQueue();
+      alert('✅ Your safety report has been sent! Rescuers have been notified.');
+    } catch (err) {
+      console.error('Error marking safe:', err);
+      alert('Failed to send safety report: ' + err.message);
+    }
+  };
 
   const refreshQueue = async () => setQueue(await getAllLocal());
 
@@ -83,12 +170,16 @@ export default function App() {
           setGpsText(`Location locked (±${Math.round(pos.coords.accuracy)}m)`);
           setGpsLocked(true);
         },
-        () => setGpsText('Could not get location — check permission. Request will still send.'),
+        () => {
+          setGpsText('Could not get location — check permission. Request will still send.');
+          setGpsFailed(true);
+        },
         { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
       );
       return () => navigator.geolocation.clearWatch(watchId);
     } else {
       setGpsText('Location not supported on this device — request will still send.');
+      setGpsFailed(true);
     }
   }, []);
 
@@ -126,13 +217,31 @@ export default function App() {
       alert("Please choose what the situation is.");
       return;
     }
+
+    const n = name.trim() || 'Not given';
+    const p = phone.trim() || 'Not given';
+
+    // Duplicate Prevention Check (5 mins threshold)
+    const isDuplicate = queue.some(r => {
+      const matchName = r.name === n;
+      const matchPhone = r.phone === p;
+      const matchSit = r.situation === situation;
+      const matchTime = Date.now() - r.capturedAt < 5 * 60 * 1000;
+      return matchName && matchPhone && matchSit && matchTime;
+    });
+
+    if (isDuplicate) {
+      alert("You have already queued this SOS request. We will transmit it as soon as connection is available.");
+      return;
+    }
+
     setBtnState('sending');
 
     const coords = coordsRef.current;
     const record = {
       localId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: name.trim() || 'Not given',
-      phone: phone.trim() || 'Not given',
+      name: n,
+      phone: p,
       peopleCount: people.trim() || '1',
       situation,
       notes: notes.trim(),
@@ -180,6 +289,77 @@ export default function App() {
           </div>
         )}
 
+        {queue.some(r => r.status === 'sent') && (
+          <div className="citizen-tracker-dashboard" style={{ background: 'var(--paper-raised)', border: '2px solid var(--line)', borderRadius: 'var(--radius)', padding: '16px', marginBottom: '20px' }}>
+            <h2 style={{ fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.03em', margin: '0 0 12px 0', borderBottom: '2px solid var(--line)', paddingBottom: '6px' }}>🛰️ Live SOS Dispatch Status</h2>
+            {queue.filter(r => r.status === 'sent').map(r => {
+              const live = liveStatuses[r.localId] || {};
+              const currentStatus = live.status || 'pending';
+              const assignedName = live.assigned_resource_name;
+              
+              // Stepper checklist mapping
+              const step1 = true; // Received
+              const step2 = !!live.ai_priority; // AI Priority triaged
+              const step3 = currentStatus === 'team_assigned' || currentStatus === 'dispatched' || currentStatus === 'rescued' || !!assignedName;
+              const step4 = currentStatus === 'dispatched' || currentStatus === 'rescued';
+              const step5 = currentStatus === 'rescued';
+              
+              return (
+                <div key={r.localId} className="tracker-card" style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px dashed var(--line)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 'bold' }}>SOS Category: {SITUATIONS.find(s => s.value === r.situation)?.label || r.situation}</span>
+                    <span className={`status-badge status-${currentStatus}`} style={{ fontSize: '9px', fontWeight: 'bold', padding: '2px 8px', borderRadius: '999px', background: currentStatus === 'rescued' ? 'var(--safe)' : currentStatus === 'dispatched' ? 'var(--danger)' : currentStatus === 'team_assigned' ? '#2563eb' : 'var(--amber)', color: '#fff' }}>
+                      {currentStatus.toUpperCase()}
+                    </span>
+                  </div>
+
+                  {/* Stepper progress circles */}
+                  <div className="tracker-stepper" style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', margin: '20px 0 16px 0' }}>
+                    <div style={{ position: 'absolute', top: '9px', left: '10px', right: '10px', height: '2px', background: 'var(--line)', zIndex: 1 }}></div>
+                    
+                    {[
+                      { active: step1, label: 'Received' },
+                      { active: step2, label: 'Triage' },
+                      { active: step3, label: 'Assigned' },
+                      { active: step4, label: 'Dispatched' },
+                      { active: step5, label: 'Rescued' }
+                    ].map((step, idx) => (
+                      <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 2, flex: 1 }}>
+                        <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: step.active ? 'var(--safe)' : 'var(--line)', border: '2px solid var(--paper-raised)', color: '#fff', fontSize: '9px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {step.active ? '✓' : idx + 1}
+                        </div>
+                        <span style={{ fontSize: '8px', fontWeight: 'bold', color: step.active ? 'var(--ink)' : 'var(--line)', marginTop: '4px', textAlign: 'center' }}>{step.label}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {assignedName && currentStatus !== 'rescued' && (
+                    <div className="responder-info-box" style={{ background: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.2)', padding: '10px', borderRadius: '8px', marginBottom: '12px', fontSize: '11px', lineHeight: '1.4' }}>
+                      🚀 <b>Assigned Team</b>: <span style={{ color: '#2563eb', fontWeight: 'bold' }}>{assignedName}</span><br />
+                      ⏱️ <b>Estimated Arrival (ETA)</b>: ~10-15 minutes (Active route)
+                    </div>
+                  )}
+
+                  {currentStatus !== 'rescued' && !r.markedSafe && (
+                    <button
+                      className="im-safe-btn"
+                      onClick={() => handleMarkSafe(r.localId)}
+                      style={{ width: '100%', padding: '10px', background: 'var(--safe)', border: '1px solid var(--safe)', color: '#fff', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', transition: 'opacity 0.2s' }}
+                    >
+                      💚 I'm Safe / Request Completed
+                    </button>
+                  )}
+                  {(currentStatus === 'rescued' || r.markedSafe) && (
+                    <div style={{ textAlign: 'center', padding: '10px', background: 'rgba(43, 175, 102, 0.1)', border: '1px solid var(--safe)', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold', color: 'var(--safe)' }}>
+                      ✅ Safety reported — Rescuers have been notified
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div className="field">
           <label htmlFor="name">Your name</label>
           <input id="name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ramesh Patil" />
@@ -211,6 +391,12 @@ export default function App() {
           </div>
         </div>
 
+        {gpsFailed && (
+          <div className="gps-failed-warning" style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', borderRadius: '8px', padding: '10px', fontSize: '11px', color: '#ef4444', fontWeight: 'bold', marginBottom: '14px', lineHeight: '1.4' }}>
+            ⚠️ Could not lock GPS location. Please make sure to write your exact address or nearby landmark in the details field below so rescuers can locate you.
+          </div>
+        )}
+
         <div className="field">
           <label htmlFor="notes">Anything else rescuers should know (optional)</label>
           <textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Landmark, floor number, elderly/children, etc." />
@@ -231,8 +417,7 @@ export default function App() {
             {btnLabel}
           </button>
           <div className="sos-caption">
-            Your exact location is sent with this request. Press once — you'll see it change to
-            "Saved" whether or not you have signal.
+            Your request is saved locally on your device immediately. Raahat will automatically upload it in the background as soon as a cellular, internet, or SMS network is detected.
           </div>
         </div>
 

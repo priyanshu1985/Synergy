@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { db, auth } from './firebaseClient';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, limit, getDocs, addDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, limit, getDocs, addDoc } from 'firebase/firestore';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { calculateSituationOverviewMetrics, getOverallSeverity } from './overviewMetrics';
@@ -120,6 +120,51 @@ const DEMO_CLUSTER_REQUESTS = [
 function isCritical(r) {
   if (r.ai_priority) return r.ai_priority === 'critical' || r.ai_priority === 'high';
   return CRITICAL.has(r.situation);
+}
+
+function calculatePriorityScore(req, clusters) {
+  let score = 0;
+
+  // 1. Urgency category base points
+  if (req.situation === 'injured' || req.situation === 'stranded') {
+    score += 40;
+  } else if (req.situation === 'evacuate') {
+    score += 25;
+  } else if (req.situation === 'supplies') {
+    score += 15;
+  }
+
+  // 2. People affected: +5 points per person, capped at 25
+  const count = parseInt(req.people_count) || 1;
+  score += Math.min(25, count * 5);
+
+  // 3. AI Priority Triage: critical +20, high +10, normal +0
+  if (req.ai_priority === 'critical') {
+    score += 20;
+  } else if (req.ai_priority === 'high') {
+    score += 10;
+  }
+
+  // 4. AI flags (medical emergency: +15, vulnerable groups: +10 each, children: +5)
+  if (req.ai_flags && Array.isArray(req.ai_flags)) {
+    if (req.ai_flags.includes('medical_emergency')) score += 15;
+    if (req.ai_flags.includes('elderly')) score += 10;
+    if (req.ai_flags.includes('pregnant')) score += 10;
+    if (req.ai_flags.includes('disabled')) score += 10;
+    if (req.ai_flags.includes('children')) score += 5;
+  }
+
+  // 5. Cluster proximity: if in an emergency cluster, add 15 points
+  const inCluster = (clusters || []).some(c => c.requests.some(r => r.id === req.id || r.localId === req.id));
+  if (inCluster) {
+    score += 15;
+  }
+
+  // 6. Waiting time escalation: +1 point for every 2 minutes since captured_at (no cap)
+  const elapsedMinutes = (Date.now() - req.captured_at) / (1000 * 60);
+  score += Math.floor(elapsedMinutes / 2);
+
+  return Math.min(100, score);
 }
 
 function markerColor(r) {
@@ -449,6 +494,14 @@ ${reqs.slice(0, 10).map((r, i) => `- **SOS #${i+1}**: ${r.name} · ${r.people_co
 
 export default function App() {
   const [requests, setRequests] = useState([]);
+  const [timeTick, setTimeTick] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeTick(prev => prev + 1);
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
   const [hospitals, setHospitals] = useState([]);
   const [shelters, setShelters] = useState([]);
   const [resources, setResources] = useState([]);
@@ -491,6 +544,102 @@ export default function App() {
   const [situationReport, setSituationReport] = useState('');
   const [situationReportLoading, setSituationReportLoading] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+
+  // Registration Form States
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [regType, setRegType] = useState('hospital'); // 'hospital' | 'shelter' | 'resource'
+  const [regName, setRegName] = useState('');
+  const [regLocation, setRegLocation] = useState('');
+  const [regLat, setRegLat] = useState('20.593');
+  const [regLng, setRegLng] = useState('78.962');
+  const [regTotalBeds, setRegTotalBeds] = useState('100');
+  const [regAvailBeds, setRegAvailBeds] = useState('50');
+  const [regIcuTotal, setRegIcuTotal] = useState('10');
+  const [regIcuAvail, setRegIcuAvail] = useState('5');
+  const [regCapacity, setRegCapacity] = useState('200');
+  const [regOccupied, setRegOccupied] = useState('50');
+  const [regFoodStock, setRegFoodStock] = useState('Good');
+  const [regWaterStock, setRegWaterStock] = useState('Good');
+  const [regMedicalStock, setRegMedicalStock] = useState('Good');
+  const [regStatus, setRegStatus] = useState('Active');
+  const [regResType, setRegResType] = useState('boat');
+  const [regAvailability, setRegAvailability] = useState('available');
+
+  const handleRegisterSubmit = async (e) => {
+    e.preventDefault();
+    if (!regName.trim() || !regLocation.trim()) {
+      alert('Please fill out Name and Location');
+      return;
+    }
+
+    const latVal = parseFloat(regLat) || 20.593;
+    const lngVal = parseFloat(regLng) || 78.962;
+
+    try {
+      if (regType === 'hospital') {
+        const docData = {
+          name: regName.trim(),
+          location: regLocation.trim(),
+          latitude: latVal,
+          longitude: lngVal,
+          totalBeds: parseInt(regTotalBeds) || 100,
+          availableBeds: parseInt(regAvailBeds) || 50,
+          icuTotal: parseInt(regIcuTotal) || 10,
+          icuAvailable: parseInt(regIcuAvail) || 5,
+          status: regStatus || 'Operational'
+        };
+        if (db) {
+          await addDoc(collection(db, 'hospitals'), docData);
+        } else {
+          setHospitals((prev) => [...prev, { id: `hosp-demo-${Date.now()}`, ...docData }]);
+        }
+      } else if (regType === 'shelter') {
+        const docData = {
+          name: regName.trim(),
+          location: regLocation.trim(),
+          latitude: latVal,
+          longitude: lngVal,
+          capacity: parseInt(regCapacity) || 200,
+          occupied: parseInt(regOccupied) || 50,
+          foodStock: regFoodStock || 'Good',
+          waterStock: regWaterStock || 'Good',
+          medicalStock: regMedicalStock || 'Good',
+          status: regStatus || 'Active'
+        };
+        if (db) {
+          await addDoc(collection(db, 'shelters'), docData);
+        } else {
+          setShelters((prev) => [...prev, { id: `shelter-demo-${Date.now()}`, ...docData }]);
+        }
+      } else if (regType === 'resource') {
+        const docData = {
+          name: regName.trim(),
+          type: regResType || 'boat',
+          latitude: latVal,
+          longitude: lngVal,
+          capacity: parseInt(regCapacity) || 10,
+          availability: regAvailability || 'available',
+          status: regStatus || 'Idle at Station'
+        };
+        if (db) {
+          await addDoc(collection(db, 'resources'), docData);
+        } else {
+          setResources((prev) => [...prev, { id: `res-demo-${Date.now()}`, ...docData }]);
+        }
+      }
+
+      // Reset values
+      setRegName('');
+      setRegLocation('');
+      setRegLat('20.593');
+      setRegLng('78.962');
+      setIsRegisterModalOpen(false);
+    } catch (err) {
+      console.error('Error registering facility/resource:', err);
+      alert('Failed to register: ' + err.message);
+    }
+  };
+
 
   // Auto-seeding helper to populate collections if they are empty
   const seedIfEmpty = async (collName, mockData) => {
@@ -568,11 +717,90 @@ export default function App() {
     unsubscribes.push(
       onSnapshot(
         qRequests,
-        (snapshot) => {
-          const list = snapshot.docs.map((d) => ({
-            id: d.id,
-            ...d.data()
-          }));
+        async (snapshot) => {
+          const list = [];
+          const safeReports = [];
+
+          snapshot.docs.forEach((d) => {
+            const data = { id: d.id, ...d.data() };
+            if (data.type === 'safe_report' && data.original_request_id) {
+              safeReports.push(data);
+            } else {
+              list.push(data);
+            }
+          });
+
+          // Process safe reports: auto-mark original requests as rescued
+          for (const report of safeReports) {
+            try {
+              const origId = report.original_request_id;
+              await updateDoc(doc(db, 'requests', origId), {
+                status: 'rescued',
+                rescued_at: report.reported_at || new Date().toISOString(),
+                safe_reported_at: report.reported_at || new Date().toISOString()
+              });
+              // Clean up the safe report document
+              await deleteDoc(doc(db, 'requests', report.id));
+            } catch (err) {
+              console.error('Error processing safe report:', err);
+            }
+          }
+
+          // Local AI triage fallback: if the Cloud Function didn't run,
+          // assign ai_priority deterministically so it never stays "Pending"
+          for (const req of list) {
+            if (!req.ai_priority && req.status !== 'rescued') {
+              const flags = [];
+              const notes = (req.notes || '').toLowerCase();
+              const sit = req.situation;
+              const count = parseInt(req.people_count) || 1;
+
+              // Detect flags from notes keywords
+              if (/injur|bleed|fracture|heart|breath|unconscious|medical/.test(notes)) flags.push('medical_emergency');
+              if (/elder|old|senior|aged/.test(notes)) flags.push('elderly');
+              if (/child|kid|infant|baby|toddler/.test(notes)) flags.push('children');
+              if (/pregnan/.test(notes)) flags.push('pregnant');
+              if (/disab|wheelchair|blind|deaf/.test(notes)) flags.push('disabled');
+              if (/no food|no water|hungry|thirst|starv/.test(notes)) flags.push('no_supplies');
+              if (/collaps|crack|structur|roof|wall falling/.test(notes)) flags.push('structural_danger');
+
+              // Determine priority
+              let priority = 'normal';
+              let summary = 'Stable situation, needs assistance.';
+
+              if (sit === 'injured' || flags.includes('medical_emergency') || flags.includes('structural_danger')) {
+                priority = 'critical';
+                summary = `Critical: ${sit === 'injured' ? 'Injured person' : 'Life-threatening situation'} with ${count} people.`;
+              } else if (sit === 'stranded' || count >= 4 || flags.includes('elderly') || flags.includes('children') || flags.includes('pregnant')) {
+                priority = 'high';
+                summary = `High priority: ${sit === 'stranded' ? 'Stranded' : 'Vulnerable group'} with ${count} people needing help.`;
+              } else if (sit === 'evacuate') {
+                priority = 'high';
+                summary = `Evacuation needed for group of ${count}.`;
+              } else {
+                summary = `${count} ${count === 1 ? 'person' : 'people'} requesting ${sit === 'supplies' ? 'supplies' : 'assistance'}.`;
+              }
+
+              // Update the request locally
+              req.ai_priority = priority;
+              req.ai_flags = flags;
+              req.ai_summary = summary;
+              req.ai_processed_at = new Date().toISOString();
+
+              // Write back to Firestore so it persists
+              try {
+                await updateDoc(doc(db, 'requests', req.id), {
+                  ai_priority: priority,
+                  ai_flags: flags,
+                  ai_summary: summary,
+                  ai_processed_at: req.ai_processed_at
+                });
+              } catch (err) {
+                console.error('Error writing local triage fallback:', err);
+              }
+            }
+          }
+
           setRequests(list);
           setLoaded(true);
         },
@@ -677,7 +905,14 @@ export default function App() {
     eligible.forEach(h => {
       const dist = getDistance(req.lat, req.lng, h.latitude, h.longitude);
       const capacityRatio = h.availableBeds / h.totalBeds;
-      const score = (capacityRatio * 0.4) + ((1 / (dist + 0.01)) * 0.6);
+      let score = (capacityRatio * 0.4) + ((1 / (dist + 0.01)) * 0.6);
+      
+      // ICU Boost for medical emergencies
+      const isMedical = req.situation === 'injured' || (req.ai_flags || []).includes('medical_emergency');
+      if (isMedical && h.icuAvailable > 0) {
+        score += 0.3;
+      }
+      
       if (score > bestScore) {
         bestScore = score;
         bestHosp = h;
@@ -714,6 +949,10 @@ export default function App() {
     let bestScore = -1;
     let bestBreakdown = null;
     
+    // Check if citizen is in a cluster
+    const cluster = clusters.find(c => c.requests.some(r => r.id === req.id || r.localId === req.id));
+    const inCluster = !!cluster;
+    
     eligible.forEach(r => {
       let typeWeight = 0.1;
       if (req.situation === 'stranded' || req.situation === 'evacuate') {
@@ -731,13 +970,31 @@ export default function App() {
       
       const dist = getDistance(req.lat, req.lng, r.latitude, r.longitude);
       const distScore = 1 / (dist + 0.01);
-      const score = (typeWeight * 0.6) + (distScore * 0.4);
+      let score = (typeWeight * 0.6) + (distScore * 0.4);
+      
+      // Cluster capacity boost: if in cluster and resource capacity >= 6, add 0.2 boost
+      let clusterBoost = 0;
+      if (inCluster && r.capacity >= 6) {
+        clusterBoost = 0.2;
+        score += clusterBoost;
+      }
+      
+      // Priority boost: if high/critical priority and fast responder type, add 0.1 boost
+      let priorityBoost = 0;
+      const isHighPri = req.ai_priority === 'critical' || req.ai_priority === 'high' || req.situation === 'injured' || req.situation === 'stranded';
+      if (isHighPri && (r.type?.toLowerCase() === 'boat' || r.type?.toLowerCase() === 'ambulance' || r.type?.toLowerCase() === 'rescue team')) {
+        priorityBoost = 0.1;
+        score += priorityBoost;
+      }
+      
       if (score > bestScore) {
         bestScore = score;
         bestRes = r;
         bestBreakdown = {
           typeWeight,
           distScore,
+          clusterBoost,
+          priorityBoost,
           finalScore: score
         };
       }
@@ -817,8 +1074,11 @@ export default function App() {
     }
   };
 
-  const updateStatus = async (id, status) => {
-    const timestampKey = status === 'dispatched' ? 'dispatched_at' : status === 'rescued' ? 'rescued_at' : null;
+  const updateStatus = async (id, status, assignedResource = null) => {
+    const timestampKey = 
+      status === 'team_assigned' ? 'assigned_at' : 
+      status === 'dispatched' ? 'dispatched_at' : 
+      status === 'rescued' ? 'rescued_at' : null;
     const timestampVal = new Date().toISOString();
 
     setRequests((prev) =>
@@ -827,7 +1087,11 @@ export default function App() {
           ? {
             ...r,
             status,
-            ...(timestampKey ? { [timestampKey]: timestampVal } : {})
+            ...(timestampKey ? { [timestampKey]: timestampVal } : {}),
+            ...(assignedResource ? {
+              assigned_resource_id: assignedResource.id || assignedResource.name,
+              assigned_resource_name: assignedResource.name
+            } : {})
           }
           : r
       )
@@ -838,8 +1102,62 @@ export default function App() {
       setSelectedSOS(prev => ({
         ...prev,
         status,
-        ...(timestampKey ? { [timestampKey]: timestampVal } : {})
+        ...(timestampKey ? { [timestampKey]: timestampVal } : {}),
+        ...(assignedResource ? {
+          assigned_resource_id: assignedResource.id || assignedResource.name,
+          assigned_resource_name: assignedResource.name
+        } : {})
       }));
+    }
+
+    // If a resource was assigned, mark that resource as 'busy' in state and db
+    if (assignedResource) {
+      setResources(prev =>
+        prev.map(res =>
+          (res.id === assignedResource.id || res.name === assignedResource.name)
+            ? { ...res, availability: 'busy', status: `Dispatched to rescue ${selectedSOS?.name || 'citizen'}` }
+            : res
+        )
+      );
+
+      if (db && assignedResource.id) {
+        try {
+          const resRef = doc(db, 'resources', assignedResource.id);
+          await updateDoc(resRef, {
+            availability: 'busy',
+            status: `Dispatched to rescue ${selectedSOS?.name || 'citizen'}`
+          });
+        } catch (err) {
+          console.error('Error updating resource to busy in Firestore:', err);
+        }
+      }
+    }
+
+    // If status is 'rescued', release the assigned resource back to 'available'
+    if (status === 'rescued') {
+      const citizenReq = requests.find(r => r.id === id);
+      const resId = citizenReq?.assigned_resource_id || selectedSOS?.assigned_resource_id;
+      const resName = citizenReq?.assigned_resource_name || selectedSOS?.assigned_resource_name;
+      if (resId || resName) {
+        setResources(prev =>
+          prev.map(res =>
+            (res.id === resId || res.name === resName)
+              ? { ...res, availability: 'available', status: 'On Standby' }
+              : res
+          )
+        );
+
+        if (db && resId) {
+          try {
+            await updateDoc(doc(db, 'resources', resId), {
+              availability: 'available',
+              status: 'On Standby'
+            });
+          } catch (err) {
+            console.error('Error freeing resource in Firestore:', err);
+          }
+        }
+      }
     }
 
     if (!db) return;
@@ -848,6 +1166,10 @@ export default function App() {
       const updates = { status };
       if (timestampKey) {
         updates[timestampKey] = timestampVal;
+      }
+      if (assignedResource) {
+        updates.assigned_resource_id = assignedResource.id || assignedResource.name;
+        updates.assigned_resource_name = assignedResource.name;
       }
       await updateDoc(doc(db, 'requests', id), updates);
     } catch (err) {
@@ -970,10 +1292,15 @@ export default function App() {
   const rescued = requests.filter((r) => r.status === 'rescued').length;
 
   const filtered = requests.filter((r) => filter === 'all' || r.status === filter);
-  const sorted = [...filtered].sort((a, b) => {
-    const aCrit = isCritical(a) ? 0 : 1;
-    const bCrit = isCritical(b) ? 0 : 1;
-    if (aCrit !== bCrit) return aCrit - bCrit;
+  const sorted = [...filtered].map(r => {
+    const score = calculatePriorityScore(r, clusters);
+    const isOverdue = score >= 75 && r.status !== 'rescued';
+    const isEscalated = r.escalated || isOverdue;
+    return { ...r, priorityScore: score, isEscalated };
+  }).sort((a, b) => {
+    if (a.isEscalated && !b.isEscalated) return -1;
+    if (!a.isEscalated && b.isEscalated) return 1;
+    if (b.priorityScore !== a.priorityScore) return b.priorityScore - a.priorityScore;
     return b.captured_at - a.captured_at;
   });
 
@@ -1066,21 +1393,129 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="actions">
-                    <button
-                      className="primary"
-                      disabled={selectedSOS.status === 'dispatched' || selectedSOS.status === 'rescued'}
-                      onClick={() => updateStatus(selectedSOS.id, 'dispatched')}
-                    >
-                      Mark Dispatched
-                    </button>
-                    <button
-                      className="done"
-                      disabled={selectedSOS.status === 'rescued'}
-                      onClick={() => updateStatus(selectedSOS.id, 'rescued')}
-                    >
-                      Mark Rescued
-                    </button>
+                  {/* Emergency Timeline UX */}
+                  <div className="emergency-timeline" style={{ marginTop: '16px', borderTop: '1px solid var(--line)', paddingTop: '14px' }}>
+                    <h4 style={{ color: '#fff', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 12px 0' }}>🚨 Emergency Tracking Timeline</h4>
+                    <div className="timeline-steps" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {/* 1. Received */}
+                      <div className="timeline-step completed" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <div className="step-marker" style={{ width: '22px', height: '22px', borderRadius: '50%', background: 'var(--safe)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold' }}>✓</div>
+                        <div className="step-details" style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span className="step-label" style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }}>Received</span>
+                          <span className="step-time" style={{ color: 'var(--muted)', fontSize: '9px' }}>{new Date(selectedSOS.captured_at).toLocaleTimeString()}</span>
+                        </div>
+                      </div>
+
+                      {/* 2. AI Priority */}
+                      <div className={`timeline-step ${selectedSOS.ai_priority ? 'completed' : 'pending'}`} style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <div className="step-marker" style={{ width: '22px', height: '22px', borderRadius: '50%', background: selectedSOS.ai_priority ? 'var(--safe)' : 'var(--line)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold' }}>{selectedSOS.ai_priority ? '✓' : '2'}</div>
+                        <div className="step-details" style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span className="step-label" style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }}>AI Priority Triage</span>
+                          {selectedSOS.ai_priority ? (
+                            <>
+                              <span className="step-desc" style={{ color: 'var(--text)', fontSize: '10px' }}>Priority: {selectedSOS.ai_priority.toUpperCase()}</span>
+                              {selectedSOS.ai_processed_at && (
+                                <span className="step-time" style={{ color: 'var(--muted)', fontSize: '9px' }}>{new Date(selectedSOS.ai_processed_at).toLocaleTimeString()}</span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="step-desc" style={{ color: 'var(--muted)', fontSize: '10px' }}>Pending triage...</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 3. Team Assigned */}
+                      <div className={`timeline-step ${(selectedSOS.status === 'team_assigned' || selectedSOS.status === 'dispatched' || selectedSOS.status === 'rescued' || selectedSOS.assigned_resource_id) ? 'completed' : 'pending'}`} style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <div className="step-marker" style={{ width: '22px', height: '22px', borderRadius: '50%', background: (selectedSOS.status === 'team_assigned' || selectedSOS.status === 'dispatched' || selectedSOS.status === 'rescued' || selectedSOS.assigned_resource_id) ? 'var(--safe)' : 'var(--line)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold' }}>{(selectedSOS.status === 'team_assigned' || selectedSOS.status === 'dispatched' || selectedSOS.status === 'rescued' || selectedSOS.assigned_resource_id) ? '✓' : '3'}</div>
+                        <div className="step-details" style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span className="step-label" style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }}>Team Assigned</span>
+                          {selectedSOS.assigned_resource_name ? (
+                            <>
+                              <span className="step-desc" style={{ color: 'var(--text)', fontSize: '10px' }}>Team: {selectedSOS.assigned_resource_name}</span>
+                              {selectedSOS.assigned_at && (
+                                <span className="step-time" style={{ color: 'var(--muted)', fontSize: '9px' }}>{new Date(selectedSOS.assigned_at).toLocaleTimeString()}</span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="step-desc" style={{ color: 'var(--muted)', fontSize: '10px' }}>Unassigned</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 4. Dispatched */}
+                      <div className={`timeline-step ${(selectedSOS.status === 'dispatched' || selectedSOS.status === 'rescued') ? 'completed' : 'pending'}`} style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <div className="step-marker" style={{ width: '22px', height: '22px', borderRadius: '50%', background: (selectedSOS.status === 'dispatched' || selectedSOS.status === 'rescued') ? 'var(--safe)' : 'var(--line)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold' }}>{(selectedSOS.status === 'dispatched' || selectedSOS.status === 'rescued') ? '✓' : '4'}</div>
+                        <div className="step-details" style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span className="step-label" style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }}>Dispatched</span>
+                          {selectedSOS.dispatched_at ? (
+                            <span className="step-time" style={{ color: 'var(--muted)', fontSize: '9px' }}>{new Date(selectedSOS.dispatched_at).toLocaleTimeString()}</span>
+                          ) : (
+                            <span className="step-desc" style={{ color: 'var(--muted)', fontSize: '10px' }}>Not dispatched</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 5. Rescued */}
+                      <div className={`timeline-step ${selectedSOS.status === 'rescued' ? 'completed' : 'pending'}`} style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <div className="step-marker" style={{ width: '22px', height: '22px', borderRadius: '50%', background: selectedSOS.status === 'rescued' ? 'var(--safe)' : 'var(--line)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold' }}>{selectedSOS.status === 'rescued' ? '✓' : '5'}</div>
+                        <div className="step-details" style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span className="step-label" style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }}>Rescued / Safe</span>
+                          {selectedSOS.rescued_at ? (
+                            <span className="step-time" style={{ color: 'var(--muted)', fontSize: '9px' }}>{new Date(selectedSOS.rescued_at).toLocaleTimeString()}</span>
+                          ) : (
+                            <span className="step-desc" style={{ color: 'var(--muted)', fontSize: '10px' }}>Active rescue on-going</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="actions" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
+                    {/* Step 1: Assign Recommended Resource */}
+                    {(!selectedSOS.assigned_resource_name && selectedSOS.status !== 'rescued') && (
+                      <button
+                        className="primary-btn"
+                        onClick={() => {
+                          if (recommendedResource) {
+                            updateStatus(selectedSOS.id, 'team_assigned', recommendedResource);
+                          } else {
+                            alert("No available resource to assign.");
+                          }
+                        }}
+                        style={{ padding: '10px', background: '#2563eb', border: '1px solid #2563eb', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+                      >
+                        Assign Recommended Team ({recommendedResource ? recommendedResource.name : 'None'})
+                      </button>
+                    )}
+
+                    {/* Step 2: Dispatch Resource */}
+                    {(selectedSOS.status === 'team_assigned' || (selectedSOS.assigned_resource_name && selectedSOS.status === 'pending')) && (
+                      <button
+                        className="primary-btn"
+                        onClick={() => updateStatus(selectedSOS.id, 'dispatched')}
+                        style={{ padding: '10px', background: '#eab308', border: '1px solid #eab308', color: '#000', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+                      >
+                        Dispatch Responder Team
+                      </button>
+                    )}
+
+                    {/* Step 3: Complete Rescue */}
+                    {(selectedSOS.status === 'dispatched') && (
+                      <button
+                        className="primary-btn"
+                        onClick={() => updateStatus(selectedSOS.id, 'rescued')}
+                        style={{ padding: '10px', background: 'var(--safe)', border: '1px solid var(--safe)', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+                      >
+                        Complete Rescue (Mark Rescued)
+                      </button>
+                    )}
+
+                    {/* Rescued / Completed State */}
+                    {selectedSOS.status === 'rescued' && (
+                      <div className="rescue-completed-banner" style={{ background: 'rgba(43, 175, 102, 0.2)', border: '1px solid var(--safe)', color: 'var(--safe)', padding: '10px', borderRadius: '8px', textAlign: 'center', fontWeight: 'bold', fontSize: '12px' }}>
+                        🎉 Rescue Operation Successfully Completed
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1153,6 +1588,20 @@ export default function App() {
                               <div className="bar"><div className="fill" style={{ width: `${Math.min(resourceWeightBreakdown.distScore * 10, 100)}%` }}></div></div>
                               <span>{Math.min(resourceWeightBreakdown.distScore * 10, 100).toFixed(0)}%</span>
                             </div>
+                            {resourceWeightBreakdown.clusterBoost > 0 && (
+                              <div className="score-row">
+                                <span>Cluster Capacity Boost:</span>
+                                <div className="bar"><div className="fill" style={{ width: `${resourceWeightBreakdown.clusterBoost * 100}%`, backgroundColor: '#10b981' }}></div></div>
+                                <span>+{(resourceWeightBreakdown.clusterBoost * 100).toFixed(0)}%</span>
+                              </div>
+                            )}
+                            {resourceWeightBreakdown.priorityBoost > 0 && (
+                              <div className="score-row">
+                                <span>Priority Speed Boost:</span>
+                                <div className="bar"><div className="fill" style={{ width: `${resourceWeightBreakdown.priorityBoost * 100}%`, backgroundColor: '#ef4444' }}></div></div>
+                                <span>+{(resourceWeightBreakdown.priorityBoost * 100).toFixed(0)}%</span>
+                              </div>
+                            )}
                             <div className="score-row final">
                               <span>Weighted Score:</span>
                               <span><b>{(resourceWeightBreakdown.finalScore * 100).toFixed(0)} / 100</b></span>
@@ -1184,9 +1633,15 @@ export default function App() {
                 </div>
 
                 <div className="filters">
-                  {['all', 'pending', 'dispatched', 'rescued'].map((f) => (
-                    <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
-                      {f === 'all' ? 'All' : f[0].toUpperCase() + f.slice(1)}
+                  {[
+                    { value: 'all', label: 'All' },
+                    { value: 'pending', label: 'Pending' },
+                    { value: 'team_assigned', label: 'Assigned' },
+                    { value: 'dispatched', label: 'Dispatched' },
+                    { value: 'rescued', label: 'Rescued' }
+                  ].map((f) => (
+                    <button key={f.value} className={filter === f.value ? 'active' : ''} onClick={() => setFilter(f.value)}>
+                      {f.label}
                     </button>
                   ))}
                 </div>
@@ -1200,9 +1655,15 @@ export default function App() {
                   )}
                   {sorted.map((r) => (
                     <div key={r.id} className={`request-card sit-${r.situation} status-${r.status}`} onClick={() => handleCardClick(r)}>
-                      <div className="row1">
+                      <div className="row1" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span className="name">{r.name} · {r.people_count} people</span>
-                        <span className="time">{new Date(r.captured_at).toLocaleTimeString()}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          {r.isEscalated && (
+                            <span className="escalation-badge pulsing" style={{ background: '#ef4444', color: '#fff', fontSize: '9px', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px' }}>🚨 ESCALATED</span>
+                          )}
+                          <span className="priority-score-badge" style={{ background: r.priorityScore >= 75 ? 'rgba(239, 68, 68, 0.15)' : r.priorityScore >= 45 ? 'rgba(234, 179, 8, 0.15)' : 'rgba(255, 255, 255, 0.05)', color: r.priorityScore >= 75 ? '#ef4444' : r.priorityScore >= 45 ? '#eab308' : '#8fa1ba', fontSize: '10px', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px', border: '1px solid currentColor' }}>Score: {r.priorityScore}</span>
+                          <span className="time">{new Date(r.captured_at).toLocaleTimeString()}</span>
+                        </div>
                       </div>
                       <div className="situation-tag">{SITUATION_LABEL[r.situation] || r.situation}</div>
 
@@ -1237,6 +1698,9 @@ export default function App() {
 
         {activeSidebarTab === 'command' && (
           <div className="command-panels">
+            <button className="register-facility-btn" onClick={() => setIsRegisterModalOpen(true)}>
+              ➕ Register Facility or Resource
+            </button>
             <div className="raahat-overview-card">
               <div className="card-header">
                 <h3>🛰️ Live Situation Overview</h3>
@@ -1557,6 +2021,181 @@ export default function App() {
           })}
         </MapContainer>
       </div>
+
+      {/* RAAHAT Facility/Team Registration Modal */}
+      {isRegisterModalOpen && (
+        <div className="report-modal-overlay">
+          <div className="report-modal register-modal">
+            <div className="modal-header">
+              <h2>➕ Register Facility or Rescue Team</h2>
+              <button className="close-modal-btn" onClick={() => setIsRegisterModalOpen(false)}>✕</button>
+            </div>
+            <form onSubmit={handleRegisterSubmit}>
+              <div className="modal-body">
+                <div className="form-group">
+                  <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Type to Register</label>
+                  <select value={regType} onChange={(e) => setRegType(e.target.value)} className="form-select" style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }}>
+                    <option value="hospital">🏥 Hospital</option>
+                    <option value="shelter">🎪 Shelter</option>
+                    <option value="resource">⚙️ Rescue Resource / Responder</option>
+                  </select>
+                </div>
+
+                <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                  <div className="form-group">
+                    <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Name</label>
+                    <input type="text" placeholder="e.g. Hope Clinic, Boat Team 3" value={regName} onChange={(e) => setRegName(e.target.value)} required style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                  </div>
+                  <div className="form-group">
+                    <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Location Area</label>
+                    <input type="text" placeholder="e.g. Sector 4 East, Hill Road" value={regLocation} onChange={(e) => setRegLocation(e.target.value)} required style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                  </div>
+                </div>
+
+                <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                  <div className="form-group">
+                    <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Latitude</label>
+                    <input type="number" step="any" value={regLat} onChange={(e) => setRegLat(e.target.value)} required style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                  </div>
+                  <div className="form-group">
+                    <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Longitude</label>
+                    <input type="number" step="any" value={regLng} onChange={(e) => setRegLng(e.target.value)} required style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                  </div>
+                </div>
+
+                {/* Conditional Fields based on regType */}
+                {regType === 'hospital' && (
+                  <>
+                    <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Total Beds</label>
+                        <input type="number" min="0" value={regTotalBeds} onChange={(e) => setRegTotalBeds(e.target.value)} style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                      </div>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Available Beds</label>
+                        <input type="number" min="0" value={regAvailBeds} onChange={(e) => setRegAvailBeds(e.target.value)} style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                      </div>
+                    </div>
+                    <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>ICU Total Beds</label>
+                        <input type="number" min="0" value={regIcuTotal} onChange={(e) => setRegIcuTotal(e.target.value)} style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                      </div>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>ICU Available</label>
+                        <input type="number" min="0" value={regIcuAvail} onChange={(e) => setRegIcuAvail(e.target.value)} style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                      </div>
+                    </div>
+                    <div className="form-group" style={{ marginTop: '12px' }}>
+                      <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Operational Status</label>
+                      <select value={regStatus} onChange={(e) => setRegStatus(e.target.value)} className="form-select" style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }}>
+                        <option value="Operational">Operational</option>
+                        <option value="Operational (Near Capacity)">Operational (Near Capacity)</option>
+                        <option value="Critical Alert">Critical Alert</option>
+                        <option value="Closed">Closed</option>
+                      </select>
+                    </div>
+                  </>
+                )}
+
+                {regType === 'shelter' && (
+                  <>
+                    <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Total Capacity</label>
+                        <input type="number" min="0" value={regCapacity} onChange={(e) => setRegCapacity(e.target.value)} style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                      </div>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Occupied Beds</label>
+                        <input type="number" min="0" value={regOccupied} onChange={(e) => setRegOccupied(e.target.value)} style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                      </div>
+                    </div>
+                    <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Food Supply Stock</label>
+                        <select value={regFoodStock} onChange={(e) => setRegFoodStock(e.target.value)} className="form-select" style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }}>
+                          <option value="Good">Good (3+ days)</option>
+                          <option value="Adequate">Adequate</option>
+                          <option value="Limited">Limited</option>
+                          <option value="Critical (Needs Supply)">Critical (Needs Supply)</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Water Supply Stock</label>
+                        <select value={regWaterStock} onChange={(e) => setRegWaterStock(e.target.value)} className="form-select" style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }}>
+                          <option value="Good">Good (3+ days)</option>
+                          <option value="Adequate">Adequate</option>
+                          <option value="Limited">Limited</option>
+                          <option value="Critical (Needs Supply)">Critical (Needs Supply)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Medical Supply Stock</label>
+                        <select value={regMedicalStock} onChange={(e) => setRegMedicalStock(e.target.value)} className="form-select" style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }}>
+                          <option value="Good">Good</option>
+                          <option value="Adequate">Adequate</option>
+                          <option value="Limited">Limited</option>
+                          <option value="Critical (Needs Supply)">Critical (Needs Supply)</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Shelter Status</label>
+                        <select value={regStatus} onChange={(e) => setRegStatus(e.target.value)} className="form-select" style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }}>
+                          <option value="Active">Active</option>
+                          <option value="Nearly Full">Nearly Full</option>
+                          <option value="Full">Full</option>
+                          <option value="Inactive">Inactive</option>
+                        </select>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {regType === 'resource' && (
+                  <>
+                    <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Resource Type</label>
+                        <select value={regResType} onChange={(e) => setRegResType(e.target.value)} className="form-select" style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }}>
+                          <option value="boat">boat</option>
+                          <option value="ambulance">ambulance</option>
+                          <option value="rescue team">rescue team</option>
+                          <option value="fire truck">fire truck</option>
+                          <option value="volunteer">volunteer</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Capacity</label>
+                        <input type="number" min="1" value={regCapacity} onChange={(e) => setRegCapacity(e.target.value)} style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                      </div>
+                    </div>
+                    <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Availability</label>
+                        <select value={regAvailability} onChange={(e) => setRegAvailability(e.target.value)} className="form-select" style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }}>
+                          <option value="available">available</option>
+                          <option value="busy">busy</option>
+                          <option value="maintenance">maintenance</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label style={{ color: '#8FA1BA', fontSize: '12px', fontWeight: 'bold' }}>Mission Status Description</label>
+                        <input type="text" placeholder="e.g. On Standby, Idle at Station" value={regStatus} onChange={(e) => setRegStatus(e.target.value)} style={{ width: '100%', padding: '10px', background: '#111a28', border: '1px solid var(--line)', color: '#fff', borderRadius: '6px', marginTop: '6px' }} />
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="modal-footer" style={{ borderTop: '1px solid var(--line)', padding: '12px 20px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button type="button" className="close-report-btn" onClick={() => setIsRegisterModalOpen(false)}>Cancel</button>
+                <button type="submit" className="print-report-btn">Register</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* RAAHAT Markdown Report Generator Overlay Modal */}
       {isReportModalOpen && (
