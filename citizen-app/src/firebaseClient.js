@@ -10,11 +10,21 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
+let app;
+let db = null;
+
 if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-  console.error(
-    'Missing Firebase env vars. Copy .env.example to .env.local and fill in your Firebase configuration.'
+  console.warn(
+    'Missing Firebase env vars. App will run in offline demo mode using IndexedDB local queue.'
   );
+} else {
+  try {
+    app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+  } catch (err) {
+    console.error('Failed to initialize Firebase client:', err);
+  }
 }
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export { db };
+

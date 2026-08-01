@@ -14,6 +14,10 @@ const SITUATIONS = [
 // Tries to insert straight to Firestore. `setDoc` with localId as document ID means a
 // retried request (already delivered once) doesn't create a duplicate document.
 async function trySend(record) {
+  if (!db) {
+    console.warn('Database is not initialized. Keeping request in local offline queue.');
+    return false;
+  }
   try {
     await setDoc(doc(db, 'requests', record.localId), {
       id: record.localId,
@@ -104,6 +108,19 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    // Periodically retry sending queued items (every 15s) in case of poor signal
+    // where the browser reports 'online' but requests initially timed out.
+    const interval = setInterval(() => {
+      const hasQueued = queue.some((r) => r.status === 'queued');
+      if (hasQueued) {
+        console.log('Background retry: attempting to flush queued requests...');
+        flushQueue();
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [queue]);
+
   const handleSubmit = async () => {
     if (!situation) {
       alert("Please choose what the situation is.");
@@ -131,6 +148,9 @@ export default function App() {
     if (sentNow) {
       record.status = 'sent';
       await saveLocal(record);
+    } else {
+      // Trigger a retry soon in case of flaky network
+      setTimeout(flushQueue, 5000);
     }
 
     setBtnState('saved');
@@ -147,8 +167,8 @@ export default function App() {
         <div className="brand">
           Raahat <span>SOS</span>
         </div>
-        <div id="net-status" className={online ? 'online' : 'offline'}>
-          {online ? 'ONLINE' : 'NO SIGNAL'}
+        <div id="net-status" className={!db ? 'demo' : online ? 'online' : 'offline'}>
+          {!db ? 'DEMO MODE' : online ? 'ONLINE' : 'NO SIGNAL'}
         </div>
       </header>
 

@@ -52,6 +52,7 @@ header.top .brand span { color: var(--danger); }
 }
 #net-status.online { background: var(--safe); color: #fff; border-color: var(--safe); }
 #net-status.offline { background: var(--ink); color: #fff; }
+#net-status.demo { background: var(--danger); color: #fff; border-color: var(--danger); }
 
 main {
   flex: 1;
