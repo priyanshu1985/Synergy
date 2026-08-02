@@ -11,7 +11,14 @@
 | 🏡 **Landing Portal** | Central entry portal for platform navigation | [raahat-home.web.app](https://raahat-home.web.app) | `raahat-home` |
 | 🚨 **Citizen SOS PWA** | Progressive Web App for citizens in distress | [raahat-citizen.web.app](https://raahat-citizen.web.app) | `raahat-citizen` |
 | 🏛️ **Command Dashboard** | Government Disaster Command Center | [raahat-dashboard.web.app](https://raahat-dashboard.web.app) | `raahat-dashboard` |
-| 🚒 **Rescue Team Portal** | Field responder dispatch & casualty management | [raahat-rescue.web.app](https://raahat-rescue.web.app) | `raahat-rescue` |
+---
+
+## 🔑 Login Credentials
+
+| Application Portal | Email Address | Password |
+| :--- | :--- | :--- |
+| 🏛️ **Command Dashboard** | `bala@gamil.com` | `Balakirshna` |
+| 🚒 **Rescue Team Dashboard** | `test_admin@raahat.org` | `password123` |
 
 ---
 
