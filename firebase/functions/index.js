@@ -1,8 +1,11 @@
 /**
- * Firebase Cloud Function: AI Auto-Triage
- * 
- * Automatically triggered when a new document lands in the 'requests' collection in Firestore.
- * Calls Claude AI (Anthropic API) to evaluate notes and update document with priority, flags, & summary.
+ * RAAHAT Firebase Cloud Functions
+ *
+ * Powered by Google Gemini AI (gemini-2.0-flash)
+ * Bug fixes applied:
+ *  - triageRequest now declares GEMINI_API_KEY secret (was silently skipped before)
+ *  - triageRequest skips safe_report marker documents (avoid wasted AI calls)
+ *  - All functions use a shared callGemini() helper
  */
 
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
@@ -11,7 +14,44 @@ const admin = require('firebase-admin');
 
 admin.initializeApp();
 
-const SYSTEM_PROMPT = `You are a triage assistant for a flood disaster response system.
+// ─── Shared Gemini Helper ────────────────────────────────────────────────────
+
+const GEMINI_MODEL = 'gemini-2.0-flash';
+
+async function callGemini(apiKey, systemPrompt, userContent, maxTokens = 400) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: 'user', parts: [{ text: userContent }] }],
+      generationConfig: {
+        maxOutputTokens: maxTokens,
+        temperature: 0.1  // Low temperature for consistent structured output
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini API error ${response.status}: ${errText}`);
+  }
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Empty response from Gemini');
+
+  // Strip markdown code fences if Gemini wraps the JSON
+  return text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+}
+
+// ─── 1. AI Auto-Triage ───────────────────────────────────────────────────────
+// Triggered when a new SOS request document is created in Firestore.
+// Classifies priority and extracts flags using Gemini AI.
+
+const TRIAGE_SYSTEM_PROMPT = `You are a triage assistant for a flood disaster response system.
 You will be given a citizen's self-reported situation, headcount, and free-text notes.
 
 Respond with ONLY a JSON object, no other text, no markdown fences, in exactly this shape:
@@ -29,189 +69,155 @@ Rules:
 - "summary": one plain-language sentence, under 20 words, for a responder scanning a list fast.
 - Base this only on what's stated. Do not guess at details not mentioned.`;
 
-exports.triageRequest = onDocumentCreated('requests/{requestId}', async (event) => {
-  const snapshot = event.data;
-  if (!snapshot) return;
+// BUG FIX 1: Added { secrets: ['GEMINI_API_KEY'] } — without this the secret
+//            was never injected and AI triage was silently skipped on every SOS.
+// BUG FIX 2: Skip safe_report marker documents created by the "I'm Safe" button.
+// Renamed from triageRequest → autoTriageSOS to avoid type-conflict with old deployment.
+exports.autoTriageSOS = onDocumentCreated(
+  { document: 'requests/{requestId}', secrets: ['GEMINI_API_KEY'] },
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
 
-  const data = snapshot.data();
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+    const data = snapshot.data();
 
-  if (!apiKey) {
-    console.log('No ANTHROPIC_API_KEY set. Skipping AI triage.');
-    return;
-  }
-
-  const userContent = [
-    `Situation category selected: ${data.situation}`,
-    `People count: ${data.people_count}`,
-    `Notes: ${data.notes || '(none written)'}`
-  ].join('\n');
-
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022',
-        max_tokens: 300,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: userContent }]
-      })
-    });
-
-    if (!response.ok) {
-      console.error('Anthropic API error:', response.status, await response.text());
+    // BUG FIX 2: Skip non-SOS marker documents (e.g. safe_report created by citizen app)
+    if (data.type === 'safe_report') {
+      console.log(`Skipping safe_report document: ${event.params.requestId}`);
       return;
     }
 
-    const aiData = await response.json();
-    const textBlock = (aiData.content || []).find((b) => b.type === 'text');
-    if (!textBlock) return;
+    // Also skip if already triaged (e.g. dashboard fallback already ran)
+    if (data.ai_priority) {
+      console.log(`Request ${event.params.requestId} already triaged. Skipping.`);
+      return;
+    }
 
-    const parsed = JSON.parse(textBlock.text);
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.log('No GEMINI_API_KEY set. Skipping AI triage.');
+      return;
+    }
 
-    await snapshot.ref.update({
-      ai_priority: parsed.priority || 'normal',
-      ai_flags: parsed.flags || [],
-      ai_summary: parsed.summary || '',
-      ai_processed_at: new Date().toISOString()
-    });
+    const userContent = [
+      `Situation category: ${data.situation}`,
+      `People affected: ${data.people_count || 1}`,
+      `Notes: ${data.notes || '(none provided)'}`
+    ].join('\n');
 
-    console.log(`Successfully triaged request ${event.params.requestId} as ${parsed.priority}`);
-  } catch (err) {
-    console.error('Error during AI triage execution:', err);
+    try {
+      const raw = await callGemini(apiKey, TRIAGE_SYSTEM_PROMPT, userContent, 300);
+      const parsed = JSON.parse(raw);
+
+      await snapshot.ref.update({
+        ai_priority: parsed.priority || 'normal',
+        ai_flags: parsed.flags || [],
+        ai_summary: parsed.summary || '',
+        ai_processed_at: new Date().toISOString(),
+        ai_engine: 'gemini-2.0-flash'
+      });
+
+      console.log(`Triaged ${event.params.requestId} → ${parsed.priority} (Gemini)`);
+    } catch (err) {
+      console.error('AI triage error:', err.message);
+    }
   }
-});
+);
 
-// RAAHAT Decision Support Engine Cloud Function
-exports.generateDecisionSupport = onCall({ secrets: ['ANTHROPIC_API_KEY'] }, async (request) => {
-  if (!request.auth) {
-    throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
-  }
+// ─── 2. Decision Support Engine ──────────────────────────────────────────────
+// Called by dashboard to generate command-center AI recommendations.
 
-  const { metrics } = request.data;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new HttpsError('failed-precondition', 'ANTHROPIC_API_KEY secret is not set.');
-  }
+exports.generateDecisionSupport = onCall(
+  { secrets: ['GEMINI_API_KEY'] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be authenticated.');
+    }
 
-  const systemPrompt = `You are the RAAHAT AI Disaster Command Decision Engine.
-Analyze the provided disaster command metrics and output ONLY a JSON object (no markdown fences, no other text) in this exact format:
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new HttpsError('failed-precondition', 'GEMINI_API_KEY not set.');
+
+    const { metrics } = request.data;
+
+    const systemPrompt = `You are the RAAHAT AI Disaster Command Decision Engine.
+Analyze the provided disaster command metrics and output ONLY a JSON object (no markdown, no extra text) in this exact format:
 {
   "overallSeverity": "STABLE" | "HIGH" | "CRITICAL",
-  "priorityArea": "Name of priority area needing attention",
-  "summary": "2-3 sentence overview of active incidents and capacity status",
+  "priorityArea": "Name of the area needing most urgent attention",
+  "summary": "2-3 sentence overview of active incidents and current capacity status",
   "recommendedActions": [
-    "Action recommendation 1",
-    "Action recommendation 2"
+    "Specific action recommendation 1",
+    "Specific action recommendation 2",
+    "Specific action recommendation 3"
   ],
   "confidence": 91
 }`;
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022',
-        max_tokens: 400,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: JSON.stringify(metrics) }]
-      })
-    });
+    try {
+      const raw = await callGemini(apiKey, systemPrompt, JSON.stringify(metrics), 500);
+      return JSON.parse(raw);
+    } catch (err) {
+      console.error('generateDecisionSupport error:', err.message);
+      throw new HttpsError('internal', err.message || 'AI decision support failed.');
+    }
+  }
+);
 
-    if (!response.ok) {
-      throw new HttpsError('internal', `Anthropic API error: ${response.status}`);
+// ─── 3. Recommendation Explainer ─────────────────────────────────────────────
+// Explains why a specific hospital, shelter, and resource were recommended for an SOS.
+
+exports.explainRecommendations = onCall(
+  { secrets: ['GEMINI_API_KEY'] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be authenticated.');
     }
 
-    const aiData = await response.json();
-    const textBlock = (aiData.content || []).find((b) => b.type === 'text');
-    if (!textBlock) throw new HttpsError('internal', 'No text returned from AI.');
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new HttpsError('failed-precondition', 'GEMINI_API_KEY not set.');
 
-    const parsed = JSON.parse(textBlock.text.trim());
-    return parsed;
-  } catch (err) {
-    console.error('generateDecisionSupport error:', err);
-    throw new HttpsError('internal', err.message || 'Error executing AI decision support.');
-  }
-});
+    const { sosRequest, hospital, shelter, resource } = request.data;
 
-// RAAHAT Recommendation Explainer Cloud Function
-exports.explainRecommendations = onCall({ secrets: ['ANTHROPIC_API_KEY'] }, async (request) => {
-  if (!request.auth) {
-    throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
-  }
-
-  const { sosRequest, hospital, shelter, resource } = request.data;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new HttpsError('failed-precondition', 'ANTHROPIC_API_KEY secret is not set.');
-  }
-
-  const systemPrompt = `You are the RAAHAT AI Disaster Coordinator.
-Explain why the recommended Hospital, Shelter, and Resource are matched to the selected citizen SOS request.
-Provide a concise explanation for each recommendation.
-Return ONLY a JSON object (no markdown fences, no other text) in this exact format:
+    const systemPrompt = `You are the RAAHAT AI Disaster Coordinator.
+Explain why the recommended Hospital, Shelter, and Rescue Resource are the best match for the given citizen SOS request.
+Return ONLY a JSON object (no markdown, no extra text) in this exact format:
 {
-  "hospitalExplanation": "Brief 1-2 sentence explanation of why this hospital was selected.",
-  "shelterExplanation": "Brief 1-2 sentence explanation of why this shelter was selected.",
-  "resourceExplanation": "Brief 1-2 sentence explanation of why this resource was matched."
+  "hospitalExplanation": "1-2 sentence explanation of why this hospital was selected.",
+  "shelterExplanation": "1-2 sentence explanation of why this shelter was selected.",
+  "resourceExplanation": "1-2 sentence explanation of why this rescue resource was matched."
 }`;
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022',
-        max_tokens: 500,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: JSON.stringify({ sosRequest, hospital, shelter, resource }) }]
-      })
-    });
+    try {
+      const raw = await callGemini(
+        apiKey, systemPrompt,
+        JSON.stringify({ sosRequest, hospital, shelter, resource }),
+        500
+      );
+      return JSON.parse(raw);
+    } catch (err) {
+      console.error('explainRecommendations error:', err.message);
+      throw new HttpsError('internal', err.message || 'AI explanation failed.');
+    }
+  }
+);
 
-    if (!response.ok) {
-      throw new HttpsError('internal', `Anthropic API error: ${response.status}`);
+// ─── 4. Situation Report (SITREP) Generator ──────────────────────────────────
+// Generates a full professional command-center situation report in Markdown.
+
+exports.generateSituationReport = onCall(
+  { secrets: ['GEMINI_API_KEY'] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be authenticated.');
     }
 
-    const aiData = await response.json();
-    const textBlock = (aiData.content || []).find((b) => b.type === 'text');
-    if (!textBlock) throw new HttpsError('internal', 'No text returned from AI.');
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new HttpsError('failed-precondition', 'GEMINI_API_KEY not set.');
 
-    const parsed = JSON.parse(textBlock.text.trim());
-    return parsed;
-  } catch (err) {
-    console.error('explainRecommendations error:', err);
-    throw new HttpsError('internal', err.message || 'Error generating explanations.');
-  }
-});
+    const { metrics, activeIncidents } = request.data;
 
-// RAAHAT Situation Report Cloud Function
-exports.generateSituationReport = onCall({ secrets: ['ANTHROPIC_API_KEY'] }, async (request) => {
-  if (!request.auth) {
-    throw new HttpsError('unauthenticated', 'The function must be called while authenticated.');
-  }
-
-  const { metrics, activeIncidents } = request.data;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new HttpsError('failed-precondition', 'ANTHROPIC_API_KEY secret is not set.');
-  }
-
-  const systemPrompt = `You are a Senior Crisis Responder writing a formal, professional Command Center Situation Report (SITREP) in Markdown.
-Write a clear, structured report based on the provided metrics and incidents.
+    const systemPrompt = `You are a Senior Crisis Responder writing a formal, professional Command Center Situation Report (SITREP) in Markdown.
+Write a clear, structured report based on the provided metrics and active incidents.
 Include these sections:
 1. Executive Summary (Overall Severity, key metrics)
 2. Active Incidents and Triage Status
@@ -219,35 +225,18 @@ Include these sections:
 4. Hospital Capacity & Shelter Logistical Status
 5. Recommended Command Actions & Resource Relocation
 
-Use professional command-center terminology. Write in markdown. Output ONLY the markdown report.`;
+Use professional command-center terminology. Write in Markdown. Output ONLY the Markdown report, no other text.`;
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022',
-        max_tokens: 1200,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: JSON.stringify({ metrics, activeIncidents }) }]
-      })
-    });
-
-    if (!response.ok) {
-      throw new HttpsError('internal', `Anthropic API error: ${response.status}`);
+    try {
+      const text = await callGemini(
+        apiKey, systemPrompt,
+        JSON.stringify({ metrics, activeIncidents }),
+        1200
+      );
+      return { report: text };
+    } catch (err) {
+      console.error('generateSituationReport error:', err.message);
+      throw new HttpsError('internal', err.message || 'AI situation report failed.');
     }
-
-    const aiData = await response.json();
-    const textBlock = (aiData.content || []).find((b) => b.type === 'text');
-    if (!textBlock) throw new HttpsError('internal', 'No text returned from AI.');
-
-    return { report: textBlock.text.trim() };
-  } catch (err) {
-    console.error('generateSituationReport error:', err);
-    throw new HttpsError('internal', err.message || 'Error generating situation report.');
   }
-});
+);

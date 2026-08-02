@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { db } from './firebaseClient';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { saveLocal, getAllLocal } from './db';
 import './styles.css';
 
@@ -57,20 +57,18 @@ export default function App() {
   const coordsRef = useRef(null);
   const [liveStatuses, setLiveStatuses] = useState({});
 
-  // Poll Firestore for live status updates (works even if onSnapshot read rules aren't deployed yet)
+  // Real-time status tracking via Firestore onSnapshot
+  // Firestore rules now allow public reads (allow read: if true)
+  // so citizens get instant updates the moment the dashboard takes action.
   useEffect(() => {
     if (!db) return;
     const activeReqs = queue.filter(r => r.status === 'sent' && !r.markedSafe);
     if (activeReqs.length === 0) return;
 
-    let cancelled = false;
-
-    const pollStatuses = async () => {
-      for (const req of activeReqs) {
-        if (cancelled) return;
-        try {
-          const { getDoc } = await import('firebase/firestore');
-          const snap = await getDoc(doc(db, 'requests', req.localId));
+    const unsubscribes = activeReqs.map(req =>
+      onSnapshot(
+        doc(db, 'requests', req.localId),
+        (snap) => {
           if (snap.exists()) {
             const data = snap.data();
             setLiveStatuses(prev => ({
@@ -88,22 +86,12 @@ export default function App() {
               }
             }));
           }
-        } catch (err) {
-          // Read permissions not deployed yet — fail silently
-          console.warn('Status polling failed (likely permissions). Will retry.', err.code);
-        }
-      }
-    };
+        },
+        (err) => console.warn('Live status listener error:', err.code)
+      )
+    );
 
-    // Initial poll immediately
-    pollStatuses();
-    // Then poll every 10 seconds
-    const interval = setInterval(pollStatuses, 10000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
+    return () => unsubscribes.forEach(unsub => unsub());
   }, [queue]);
 
   const handleMarkSafe = async (localId) => {
