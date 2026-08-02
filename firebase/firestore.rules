@@ -11,7 +11,7 @@ service cloud.firestore {
       // Anyone can read requests to track their live rescue status
       allow read: if true;
       
-      // Authenticated responders can perform any update.
+      // Authenticated responders (command center & rescue teams) can perform updates.
       // Unauthenticated citizens can update to mark themselves safe (status set to 'rescued').
       allow update: if request.auth != null || request.resource.data.status == 'rescued';
     }

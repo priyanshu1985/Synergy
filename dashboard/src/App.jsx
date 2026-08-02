@@ -966,19 +966,23 @@ export default function App() {
   };
 
   const getResourceRecommendation = (req) => {
-    const eligible = resources.filter(r => r.availability?.toLowerCase() === 'available');
+    const eligible = resources.filter(r => {
+      const avail = (r.availability || '').toLowerCase();
+      const stat = (r.status || '').toLowerCase();
+      return avail === 'available' || avail === '' || stat.includes('idle') || stat.includes('standby') || stat.includes('available');
+    });
     if (eligible.length === 0) return { resource: null, score: 0, weightBreakdown: null };
-    
+
     let bestRes = null;
     let bestScore = -1;
     let bestBreakdown = null;
-    
+
     // Check if citizen is in a cluster
-    const cluster = clusters.find(c => c.requests.some(r => r.id === req.id || r.localId === req.id));
+    const cluster = clusters.find(c => c.requests.some(r => r.id === req.id || r.localId === req.id || r.id === req.local_id));
     const inCluster = !!cluster;
-    
+
     eligible.forEach(r => {
-      let typeWeight = 0.1;
+      let typeWeight = 0.3; // Baseline type weight fallback
       if (req.situation === 'stranded' || req.situation === 'evacuate') {
         if (r.type?.toLowerCase() === 'boat') typeWeight = 1.0;
         else if (r.type?.toLowerCase() === 'rescue team') typeWeight = 0.8;
@@ -991,18 +995,23 @@ export default function App() {
         if (r.type?.toLowerCase() === 'volunteer') typeWeight = 1.0;
         else if (r.type?.toLowerCase() === 'fire truck') typeWeight = 0.6;
       }
-      
-      const dist = getDistance(req.lat, req.lng, r.latitude, r.longitude);
+
+      const reqLat = req.lat ?? req.latitude;
+      const reqLng = req.lng ?? req.longitude;
+      const rLat = r.latitude ?? r.lat;
+      const rLng = r.longitude ?? r.lng;
+
+      const dist = getDistance(reqLat, reqLng, rLat, rLng);
       const distScore = 1 / (dist + 0.01);
       let score = (typeWeight * 0.6) + (distScore * 0.4);
-      
+
       // Cluster capacity boost: if in cluster and resource capacity >= 6, add 0.2 boost
       let clusterBoost = 0;
       if (inCluster && r.capacity >= 6) {
         clusterBoost = 0.2;
         score += clusterBoost;
       }
-      
+
       // Priority boost: if high/critical priority and fast responder type, add 0.1 boost
       let priorityBoost = 0;
       const isHighPri = req.ai_priority === 'critical' || req.ai_priority === 'high' || req.situation === 'injured' || req.situation === 'stranded';
@@ -1010,7 +1019,7 @@ export default function App() {
         priorityBoost = 0.1;
         score += priorityBoost;
       }
-      
+
       if (score > bestScore) {
         bestScore = score;
         bestRes = r;
@@ -1636,21 +1645,51 @@ export default function App() {
                   </div>
 
                   <div className="actions" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '16px' }}>
-                    {/* Step 1: Assign Recommended Resource */}
-                    {(!selectedSOS.assigned_resource_name && selectedSOS.status !== 'rescued') && (
-                      <button
-                        className="primary-btn"
-                        onClick={() => {
-                          if (recommendedResource) {
-                            updateStatus(selectedSOS.id, 'team_assigned', recommendedResource);
-                          } else {
-                            alert("No available resource to assign.");
-                          }
-                        }}
-                        style={{ padding: '10px', background: '#2563eb', border: '1px solid #2563eb', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
-                      >
-                        Assign Recommended Team ({recommendedResource ? recommendedResource.name : 'None'})
-                      </button>
+                    {/* Step 1: Assign Team — handled automatically by AI Cloud Function */}
+                    {selectedSOS.status !== 'rescued' && (
+                      selectedSOS.assigned_resource_name ? (
+                        /* Already auto-assigned by AI — show confirmation banner */
+                        <div style={{
+                          background: 'rgba(37, 99, 235, 0.12)',
+                          border: '1px solid #2563eb',
+                          borderRadius: '8px',
+                          padding: '10px 12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px'
+                        }}>
+                          <div style={{ color: '#60a5fa', fontSize: '10px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            🤖 AI Auto-Assigned
+                          </div>
+                          <div style={{ color: '#fff', fontSize: '12px', fontWeight: 'bold' }}>
+                            {selectedSOS.assigned_resource_name}
+                          </div>
+                          <div style={{ color: 'var(--muted)', fontSize: '10px' }}>
+                            Assigned at {selectedSOS.assigned_at ? new Date(selectedSOS.assigned_at).toLocaleTimeString() : 'Unknown'}
+                          </div>
+                        </div>
+                      ) : (
+                        /* Not yet assigned — show manual assign button */
+                        <button
+                          className="primary-btn"
+                          onClick={() => {
+                            if (recommendedResource) {
+                              updateStatus(selectedSOS.id, 'team_assigned', recommendedResource);
+                            } else {
+                              /* Fallback: pick any resource regardless of availability */
+                              const anyResource = resources[0];
+                              if (anyResource) {
+                                updateStatus(selectedSOS.id, 'team_assigned', anyResource);
+                              } else {
+                                alert("No resources registered. Please add resources in the Infrastructure tab.");
+                              }
+                            }
+                          }}
+                          style={{ padding: '10px', background: '#2563eb', border: '1px solid #2563eb', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}
+                        >
+                          🤖 Assign Recommended Team ({recommendedResource ? recommendedResource.name : resources[0]?.name || 'None'})
+                        </button>
+                      )
                     )}
 
                     {/* Step 2: Dispatch Resource */}

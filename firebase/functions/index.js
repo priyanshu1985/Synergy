@@ -11,6 +11,7 @@
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
+const { findBestResourceMatch } = require('./resourceMatching');
 
 admin.initializeApp();
 
@@ -109,15 +110,51 @@ exports.autoTriageSOS = onDocumentCreated(
       const raw = await callGemini(apiKey, TRIAGE_SYSTEM_PROMPT, userContent, 300);
       const parsed = JSON.parse(raw);
 
-      await snapshot.ref.update({
-        ai_priority: parsed.priority || 'normal',
-        ai_flags: parsed.flags || [],
-        ai_summary: parsed.summary || '',
-        ai_processed_at: new Date().toISOString(),
-        ai_engine: 'gemini-2.0-flash'
-      });
+      const aiPriority = parsed.priority || 'normal';
+      const aiFlags = parsed.flags || [];
+      const aiSummary = parsed.summary || '';
+      const nowStr = new Date().toISOString();
 
-      console.log(`Triaged ${event.params.requestId} → ${parsed.priority} (Gemini)`);
+      const updatePayload = {
+        ai_priority: aiPriority,
+        ai_flags: aiFlags,
+        ai_summary: aiSummary,
+        ai_processed_at: nowStr,
+        ai_engine: 'gemini-2.0-flash'
+      };
+
+      // Query available resources from Firestore to perform automatic assignment
+      const db = admin.firestore();
+      const resSnap = await db.collection('resources').get();
+      const availableResources = [];
+      resSnap.forEach((d) => availableResources.push({ id: d.id, ...d.data() }));
+
+      const { resource: bestRes } = findBestResourceMatch(
+        { ...data, ai_priority: aiPriority, ai_flags: aiFlags },
+        availableResources
+      );
+
+      if (bestRes) {
+        updatePayload.assigned_resource_id = bestRes.id || bestRes.name;
+        updatePayload.assigned_resource_name = bestRes.name;
+        updatePayload.assigned_at = nowStr;
+        updatePayload.status = 'team_assigned';
+
+        // Update matched resource status to busy
+        try {
+          if (bestRes.id) {
+            await db.collection('resources').doc(bestRes.id).update({
+              availability: 'busy',
+              status: `Dispatched to rescue ${data.name || 'citizen'}`
+            });
+          }
+        } catch (resErr) {
+          console.warn('Resource status update failed during auto-assignment:', resErr.message);
+        }
+      }
+
+      await snapshot.ref.update(updatePayload);
+      console.log(`Triaged ${event.params.requestId} → ${aiPriority} (Assigned: ${bestRes ? bestRes.name : 'None'})`);
     } catch (err) {
       console.error('AI triage error:', err.message);
     }

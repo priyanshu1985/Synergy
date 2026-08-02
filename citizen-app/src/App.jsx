@@ -43,14 +43,22 @@ async function trySend(record) {
       const transcript = record.audioTranscript || record.audio_transcript;
       const analysis = record.audioAnalysis || record.audio_analysis;
 
-      docPayload.audio_data = b64;
-      docPayload.audioData = b64;
-      docPayload.audio_size_kb = sizeKb;
-      docPayload.audioSizeKb = sizeKb;
-      docPayload.audio_transcript = transcript;
-      docPayload.audioTranscript = transcript;
-      docPayload.audio_analysis = analysis;
-      docPayload.audioAnalysis = analysis;
+      if (b64 !== undefined) {
+        docPayload.audio_data = b64;
+        docPayload.audioData = b64;
+      }
+      if (sizeKb !== undefined) {
+        docPayload.audio_size_kb = sizeKb;
+        docPayload.audioSizeKb = sizeKb;
+      }
+      if (transcript !== undefined) {
+        docPayload.audio_transcript = transcript;
+        docPayload.audioTranscript = transcript;
+      }
+      if (analysis !== undefined) {
+        docPayload.audio_analysis = analysis;
+        docPayload.audioAnalysis = analysis;
+      }
     }
 
     if (record.imageData || record.image_data) {
@@ -59,15 +67,30 @@ async function trySend(record) {
       const origMb = record.originalSizeMb || record.image_original_size_mb;
       const imgAnalysis = record.imageAnalysis || record.image_analysis;
 
-      docPayload.image_data = imgB64;
-      docPayload.imageData = imgB64;
-      docPayload.image_size_kb = imgKb;
-      docPayload.imageSizeKb = imgKb;
-      docPayload.image_original_size_mb = origMb;
-      docPayload.imageOriginalSizeMb = origMb;
-      docPayload.image_analysis = imgAnalysis;
-      docPayload.imageAnalysis = imgAnalysis;
+      if (imgB64 !== undefined) {
+        docPayload.image_data = imgB64;
+        docPayload.imageData = imgB64;
+      }
+      if (imgKb !== undefined) {
+        docPayload.image_size_kb = imgKb;
+        docPayload.imageSizeKb = imgKb;
+      }
+      if (origMb !== undefined) {
+        docPayload.image_original_size_mb = origMb;
+        docPayload.imageOriginalSizeMb = origMb;
+      }
+      if (imgAnalysis !== undefined) {
+        docPayload.image_analysis = imgAnalysis;
+        docPayload.imageAnalysis = imgAnalysis;
+      }
     }
+
+    // Failsafe: Remove any undefined fields because Firestore setDoc throws on undefined
+    Object.keys(docPayload).forEach((key) => {
+      if (docPayload[key] === undefined) {
+        delete docPayload[key];
+      }
+    });
 
     await setDoc(doc(db, 'requests', record.localId), docPayload, { merge: true });
     return true;
