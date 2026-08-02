@@ -56,6 +56,21 @@
           "destination": "/index.html"
         }
       ]
+    },
+    {
+      "site": "raahat-home",
+      "public": "landing",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
     }
   ]
 }

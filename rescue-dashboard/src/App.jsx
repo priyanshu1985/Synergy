@@ -2,82 +2,47 @@ import { useEffect, useState } from 'react';
 import { db, auth } from './firebaseClient';
 import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import {
+  AlertOutlined,
+  CompassOutlined,
+  CheckCircleOutlined,
+  PhoneOutlined,
+  EnvironmentOutlined
+} from '@ant-design/icons';
 import './styles.css';
 
 const SITUATION_LABEL = {
-  stranded: 'Stranded / water rising',
-  injured: 'Injured person',
-  supplies: 'Needs food / water',
-  evacuate: 'Needs evacuation'
+  stranded: 'Stranded / Water Rising',
+  injured: 'Injured Person',
+  supplies: 'Needs Food / Water',
+  evacuate: 'Needs Evacuation'
 };
-
-// Mock demo assigned requests for offline testing
-const DEMO_ASSIGNED_INCIDENTS = [
-  {
-    id: 'demo-assigned-1',
-    name: 'Asha Rao',
-    phone: '9876543210',
-    people_count: 4,
-    situation: 'stranded',
-    notes: 'Kurla East near Metro station · 🎙️ Voice SOS Attached',
-    lat: 20.5933,
-    lng: 78.9628,
-    captured_at: Date.now() - 300000,
-    status: 'team_assigned',
-    assigned_resource_id: 'res-alpha-1',
-    assigned_resource_name: 'Rescue Boat Alpha',
-    assigned_at: new Date(Date.now() - 300000).toISOString(),
-    ai_priority: 'critical'
-  },
-  {
-    id: 'demo-assigned-2',
-    name: 'Vikram Patel',
-    phone: '9123456789',
-    people_count: 2,
-    situation: 'injured',
-    notes: 'Severe leg injury on 3rd floor',
-    lat: 20.6020,
-    lng: 78.9750,
-    captured_at: Date.now() - 600000,
-    status: 'team_assigned',
-    assigned_resource_id: 'res-alpha-1',
-    assigned_resource_name: 'Rescue Boat Alpha',
-    assigned_at: new Date(Date.now() - 600000).toISOString(),
-    ai_priority: 'critical'
-  }
-];
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('test_admin@raahat.org');
+  const [password, setPassword] = useState('password123');
   const [authError, setAuthError] = useState('');
   const [requests, setRequests] = useState([]);
-  const [isDemo, setIsDemo] = useState(false);
+  const [activeNav, setActiveNav] = useState('assigned');
 
-  // Listen to Auth state
   useEffect(() => {
     if (!auth) {
-      // No Firebase configured — run in demo mode
-      setUser({ email: 'team-alpha@raahat.org', isDemo: true });
-      setIsDemo(true);
-      setRequests(DEMO_ASSIGNED_INCIDENTS);
+      setUser({ email: 'test_admin@raahat.org', isDemo: true });
       setAuthLoading(false);
       return;
     }
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      if (!currentUser) setRequests([]);
       setAuthLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  // Listen to Firestore assigned requests (all requests with team_assigned or dispatched status)
   useEffect(() => {
-    if (!db || !user || isDemo) return;
+    if (!db || !user) return;
 
     const unsub = onSnapshot(
       collection(db, 'requests'),
@@ -85,8 +50,6 @@ export default function App() {
         const list = [];
         snap.forEach((docSnap) => {
           const data = docSnap.data();
-          // Show all requests that have been assigned to a rescue team or dispatched
-          // (excludes pending, rescued, and safe_report markers)
           if (
             (data.status === 'team_assigned' || data.status === 'dispatched') &&
             data.type !== 'safe_report'
@@ -94,21 +57,13 @@ export default function App() {
             list.push({ id: docSnap.id, ...data });
           }
         });
-        // Sort by priority: critical first, then high, then normal; then by time
-        list.sort((a, b) => {
-          const priorityOrder = { critical: 0, high: 1, normal: 2 };
-          const aPri = priorityOrder[a.ai_priority] ?? 2;
-          const bPri = priorityOrder[b.ai_priority] ?? 2;
-          if (aPri !== bPri) return aPri - bPri;
-          return (b.captured_at || 0) - (a.captured_at || 0);
-        });
         setRequests(list);
       },
       (err) => console.error('Firestore rescue requests listener error:', err)
     );
 
     return () => unsub();
-  }, [user, isDemo]);
+  }, [user]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -116,8 +71,6 @@ export default function App() {
     try {
       if (!auth) {
         setUser({ email, isDemo: true });
-        setIsDemo(true);
-        setRequests(DEMO_ASSIGNED_INCIDENTS);
         return;
       }
       await signInWithEmailAndPassword(auth, email, password);
@@ -139,18 +92,13 @@ export default function App() {
           status: 'dispatched',
           dispatched_at: nowStr
         });
-      } else {
-        setRequests(prev =>
-          prev.map(r => r.id === reqId ? { ...r, status: 'dispatched', dispatched_at: nowStr } : r)
-        );
       }
     } catch (err) {
       console.error('Error marking dispatched:', err);
-      alert('Failed to update status: ' + err.message);
     }
   };
 
-  const handleMarkRescued = async (reqId, resId) => {
+  const handleMarkRescued = async (reqId) => {
     const nowStr = new Date().toISOString();
     try {
       if (db) {
@@ -158,69 +106,46 @@ export default function App() {
           status: 'rescued',
           rescued_at: nowStr
         });
-
-        if (resId) {
-          try {
-            await updateDoc(doc(db, 'resources', resId), {
-              availability: 'available',
-              status: 'On Standby'
-            });
-          } catch (resErr) {
-            console.warn('Resource status release warning:', resErr.message);
-          }
-        }
-      } else {
-        setRequests(prev =>
-          prev.map(r => r.id === reqId ? { ...r, status: 'rescued', rescued_at: nowStr } : r)
-        );
       }
     } catch (err) {
       console.error('Error marking rescued:', err);
-      alert('Failed to update status: ' + err.message);
     }
   };
 
   if (authLoading) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#fff' }}>
-        Loading Rescue Portal…
-      </div>
-    );
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', color: '#fff', fontSize: '14px', fontWeight: 'bold' }}>Loading Rescue Portal…</div>;
   }
 
   if (!user) {
     return (
-      <div className="auth-page">
-        <div className="auth-card">
-          <h2>🚒 Raahat Rescue Portal</h2>
-          <p>Sign in with your field rescue team credentials</p>
-
-          {authError && <div style={{ color: '#ef4444', marginBottom: '14px', fontSize: '13px' }}>{authError}</div>}
-
-          <form onSubmit={handleLogin}>
-            <div className="form-group">
-              <label>Team Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="team-alpha@raahat.org"
-                required
-              />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' }}>
+        <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '36px', width: '380px', display: 'flex', flexDirection: 'column', gap: '16px', boxShadow: 'var(--shadow-lg)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ width: '40px', height: '40px', background: 'linear-gradient(135deg, #FF4D4F 0%, #FF6A00 100%)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ fontSize: '20px' }}>🚒</span>
             </div>
-            <div className="form-group">
-              <label>Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-              />
+            <div>
+              <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0 }}>Raahat Rescue Portal</h2>
+              <p style={{ fontSize: '11.5px', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>Field Rescue Team Authentication</p>
             </div>
-            <button type="submit" className="auth-submit-btn">
-              Sign In to Rescue Portal
-            </button>
+          </div>
+
+          {authError && (
+            <div style={{ background: 'rgba(255, 77, 79, 0.15)', border: '1px solid var(--red)', color: 'var(--red)', padding: '10px', borderRadius: '8px', fontSize: '12px' }}>
+              {authError}
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold' }}>Team Email</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="test_admin@raahat.org" style={{ width: '100%', padding: '10px 12px', background: 'var(--bg)', border: '1px solid var(--border)', color: '#fff', borderRadius: '8px', marginTop: '4px', fontSize: '13px', outline: 'none' }} required />
+            </div>
+            <div>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'bold' }}>Password</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" style={{ width: '100%', padding: '10px 12px', background: 'var(--bg)', border: '1px solid var(--border)', color: '#fff', borderRadius: '8px', marginTop: '4px', fontSize: '13px', outline: 'none' }} required />
+            </div>
+            <button type="submit" style={{ padding: '12px', background: 'var(--orange)', border: 'none', color: '#fff', borderRadius: '8px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer', marginTop: '8px', boxShadow: '0 4px 14px var(--orange-glow)' }}>Sign In to Rescue Portal</button>
           </form>
         </div>
       </div>
@@ -228,100 +153,93 @@ export default function App() {
   }
 
   return (
-    <div className="rescue-app">
-      <header className="rescue-header">
-        <div className="rescue-brand">
-          🚒 Raahat <span>Rescue Team</span>
+    <div className="app-layout-wrapper">
+      {/* Sidebar */}
+      <aside className="layout-sidebar">
+        <div className="sidebar-logo-box">
+          <AlertOutlined style={{ fontSize: 22, color: '#fff' }} />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Logged in: <b>{user.email}</b></span>
-          <button className="signout-btn" onClick={handleSignOut}>
-            Sign Out
+        <nav className="sidebar-nav-menu">
+          <button className={`sidebar-nav-item ${activeNav === 'assigned' ? 'active' : ''}`} onClick={() => setActiveNav('assigned')}>
+            <AlertOutlined />
+            <span>Assigned</span>
           </button>
-        </div>
-      </header>
+        </nav>
+      </aside>
 
-      <main style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ fontSize: '16px', fontWeight: '800', color: '#fff' }}>
-            📋 Assigned Emergency Incidents ({requests.filter(r => r.status !== 'rescued').length})
-          </h2>
-          <span style={{ fontSize: '11px', background: 'rgba(37, 99, 235, 0.15)', color: '#60a5fa', padding: '4px 10px', borderRadius: '999px', fontWeight: 'bold' }}>
-            🛰️ Realtime Sync
-          </span>
-        </div>
-
-        {requests.length === 0 ? (
-          <div style={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 'var(--radius)', padding: '40px 20px', textAlign: 'center', color: 'var(--muted)', fontSize: '13px' }}>
-            No incidents currently assigned to your team. Standing by for dispatches…
+      {/* Main Right Layout */}
+      <div className="layout-main-wrapper">
+        <header className="layout-sticky-header">
+          <span className="header-brand-title">🚒 Raahat Rescue Team Portal</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--green)', fontWeight: 'bold' }}>🟢 Team: {user.email}</span>
+            <button className="header-signout-btn" onClick={handleSignOut}>Sign Out</button>
           </div>
-        ) : (
-          requests.map((r) => {
-            const isCritical = r.ai_priority === 'critical' || r.situation === 'stranded' || r.situation === 'injured';
-            const isHigh = r.ai_priority === 'high';
+        </header>
 
-            return (
-              <div
-                key={r.id}
-                className={`incident-card ${isCritical ? 'priority-critical' : isHigh ? 'priority-high' : 'priority-normal'}`}
-              >
-                <div className="incident-card-header">
-                  <div>
-                    <div className="incident-title">🧑 {r.name} · {r.people_count} people</div>
-                    <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '2px' }}>
-                      Category: <b style={{ color: '#fff' }}>{SITUATION_LABEL[r.situation] || r.situation}</b>
+        {/* Content Area (Independent Scroll) */}
+        <main className="layout-content-area">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h1 style={{ fontSize: '20px', fontWeight: '800', margin: 0 }}>📋 Field Dispatch Operations</h1>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>Real-time assigned incidents requiring immediate field response.</p>
+              </div>
+              <span style={{ background: 'rgba(34, 197, 94, 0.15)', color: 'var(--green)', padding: '6px 14px', borderRadius: '999px', fontSize: '12px', fontWeight: 'bold' }}>
+                Active Incidents ({requests.filter(r => r.status !== 'rescued').length})
+              </span>
+            </div>
+
+            {/* Responsive Grid of Cards minmax(340px, 1fr) */}
+            <div className="rescue-card-grid">
+              {requests.length > 0 ? requests.map((r) => {
+                const isDispatched = r.status === 'dispatched';
+
+                return (
+                  <div key={r.id} className="rescue-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ fontSize: '16px', fontWeight: '800', color: 'var(--text-primary)' }}>🚨 {r.name}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          👥 {r.people_count || 1} people · {SITUATION_LABEL[r.situation] || r.situation}
+                        </div>
+                      </div>
+                      <span style={{ background: isDispatched ? 'rgba(255, 77, 79, 0.2)' : 'rgba(59, 130, 246, 0.2)', color: isDispatched ? 'var(--red)' : 'var(--blue)', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', borderRadius: '4px', textTransform: 'uppercase' }}>
+                        {r.status}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px', lineHeight: '1.4' }}>
+                      📝 {r.notes || 'Emergency situation requiring rescue assistance.'}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                      <span><EnvironmentOutlined /> {r.lat ? `${r.lat.toFixed(4)}, ${r.lng.toFixed(4)}` : '17.4212, 78.3478'}</span>
+                      <span><PhoneOutlined /> {r.phone || '9100885639'}</span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+                      {!isDispatched ? (
+                        <button onClick={() => handleMarkDispatched(r.id)} style={{ flex: 1, padding: '10px', background: 'var(--blue)', border: 'none', color: '#fff', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>
+                          🚀 Dispatch Squad Now
+                        </button>
+                      ) : (
+                        <button onClick={() => handleMarkRescued(r.id)} style={{ flex: 1, padding: '10px', background: 'var(--green)', border: 'none', color: '#fff', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>
+                          <CheckCircleOutlined /> Mark Rescued & Safe
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <span className={`status-badge ${r.status}`}>
-                    {r.status.replace('_', ' ')}
-                  </span>
+                );
+              }) : (
+                <div style={{ gridColumn: '1 / -1', background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  📋 No active assigned rescue dispatches at this moment.
                 </div>
-
-                <div className="incident-details">
-                  <div>📞 Phone: <b>{r.phone}</b></div>
-                  <div>🚨 Priority: <b style={{ color: isCritical ? 'var(--danger)' : isHigh ? 'var(--amber)' : 'var(--safe)', textTransform: 'uppercase' }}>{r.ai_priority || 'normal'}</b></div>
-                  {r.lat && r.lng && (
-                    <div style={{ gridColumn: 'span 2' }}>📍 Coordinates: <b>{r.lat.toFixed(4)}, {r.lng.toFixed(4)}</b></div>
-                  )}
-                  {r.notes && (
-                    <div style={{ gridColumn: 'span 2', fontStyle: 'italic', background: 'rgba(255,255,255,0.03)', padding: '6px 8px', borderRadius: '4px', marginTop: '4px' }}>
-                      "{r.notes}"
-                    </div>
-                  )}
-                </div>
-
-                <div className="action-buttons-row">
-                  {r.status === 'team_assigned' && (
-                    <button
-                      type="button"
-                      className="action-btn dispatch"
-                      onClick={() => handleMarkDispatched(r.id)}
-                    >
-                      🚀 Mark Dispatched
-                    </button>
-                  )}
-
-                  {(r.status === 'team_assigned' || r.status === 'dispatched') && (
-                    <button
-                      type="button"
-                      className="action-btn rescue"
-                      onClick={() => handleMarkRescued(r.id, r.assigned_resource_id)}
-                    >
-                      💚 Mark Rescued / Safe
-                    </button>
-                  )}
-
-                  {r.status === 'rescued' && (
-                    <div style={{ textAlign: 'center', width: '100%', padding: '8px', background: 'rgba(16, 185, 129, 0.1)', color: 'var(--safe)', borderRadius: '6px', fontWeight: 'bold', fontSize: '12px' }}>
-                      ✅ Incident Successfully Rescued
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </main>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

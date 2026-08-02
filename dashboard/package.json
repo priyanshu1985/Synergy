@@ -10,6 +10,8 @@
     "test": "node --test src/overviewMetrics.test.js"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.3.2",
+    "antd": "^6.5.3",
     "firebase": "^12.17.0",
     "leaflet": "^1.9.4",
     "react": "^18.3.1",

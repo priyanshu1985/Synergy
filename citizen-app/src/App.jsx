@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { db } from './firebaseClient';
-import { doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, collection } from 'firebase/firestore';
 import { saveLocal, getAllLocal } from './db';
 import './styles.css';
 import VoiceSOSModal from './components/VoiceSOSModal';
@@ -123,6 +123,10 @@ export default function App() {
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
   const [photoRecordData, setPhotoRecordData] = useState(null);
 
+  // Predictive Flood Warning States
+  const [floodWarnings, setFloodWarnings] = useState([]);
+  const [isWarningDismissed, setIsWarningDismissed] = useState(false);
+
   const handleVoiceRecorded = (recordedData) => {
     setVoiceRecordData(recordedData);
     const { analysis, transcript } = recordedData;
@@ -195,6 +199,21 @@ export default function App() {
 
     return () => unsubscribes.forEach(unsub => unsub());
   }, [queue]);
+
+  // Real-time listener for predictive flood warnings
+  useEffect(() => {
+    if (!db) return;
+    const unsub = onSnapshot(
+      collection(db, 'flood_warnings'),
+      (snap) => {
+        const list = [];
+        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+        setFloodWarnings(list);
+      },
+      (err) => console.warn('Flood warnings listener error:', err.message)
+    );
+    return () => unsub();
+  }, []);
 
   const handleMarkSafe = async (localId) => {
     const confirmSafe = window.confirm("Are you sure you want to mark yourself as safe? Rescuers will be notified.");
@@ -553,6 +572,67 @@ export default function App() {
           <span className="dot"></span>
           <span>{gpsText}</span>
         </div>
+
+        {/* PREDICTIVE FLOOD EARLY WARNING BANNER */}
+        {(() => {
+          if (isWarningDismissed || floodWarnings.length === 0) return null;
+
+          const getDistanceKm = (lat1, lon1, lat2, lon2) => {
+            const R = 6371;
+            const dLat = ((lat2 - lat1) * Math.PI) / 180;
+            const dLon = ((lon2 - lon1) * Math.PI) / 180;
+            const a =
+              Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+          };
+
+          const userLat = coordsRef.current?.lat;
+          const userLng = coordsRef.current?.lng;
+
+          // Find elevated or severe warning within ~5km (or nearest active warning if GPS not locked)
+          const activeWarning = floodWarnings.find((w) => {
+            if (w.risk_level !== 'elevated' && w.risk_level !== 'severe') return false;
+            if (userLat && userLng && w.lat && w.lng) {
+              return getDistanceKm(userLat, userLng, w.lat, w.lng) <= 5.0;
+            }
+            return true; // Fallback: show warning if nearby GPS is undetermined
+          });
+
+          if (!activeWarning) return null;
+          const isSevere = activeWarning.risk_level === 'severe';
+
+          return (
+            <div
+              className="flood-early-warning-banner"
+              style={{
+                background: isSevere ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                border: `2px solid ${isSevere ? 'var(--danger)' : 'var(--amber)'}`,
+                borderRadius: 'var(--radius)',
+                padding: '12px 14px',
+                marginBottom: '16px',
+                position: 'relative'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <span style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: isSevere ? 'var(--danger)' : 'var(--amber)', letterSpacing: '0.05em' }}>
+                  ⚠️ FLOOD WARNING ({activeWarning.risk_level.toUpperCase()}) — {activeWarning.zone_name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsWarningDismissed(true)}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--ink)', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', padding: '0 4px' }}
+                >
+                  ✕
+                </button>
+              </div>
+              <p style={{ margin: 0, fontSize: '12px', lineHeight: '1.4', color: 'var(--ink)' }}>
+                {activeWarning.ai_warning_text || `Elevated precipitation or river discharge detected near ${activeWarning.zone_name}. Stay alert and seek high ground if water rises.`}
+              </p>
+            </div>
+          );
+        })()}
 
         <div className="sos-wrap">
           <button
