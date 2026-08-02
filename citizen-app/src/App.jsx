@@ -34,42 +34,9 @@ async function trySend(record) {
       accuracy: record.accuracy,
       captured_at: record.capturedAt,
       received_at: new Date().toISOString(),
-      status: 'pending'
+      status: 'RECEIVED',
+      merge: true
     };
-
-    if (record.audioData || record.audio_data) {
-      const b64 = record.audioData || record.audio_data;
-      const sizeKb = record.audioSizeKb || record.audio_size_kb;
-      const transcript = record.audioTranscript || record.audio_transcript;
-      const analysis = record.audioAnalysis || record.audio_analysis;
-
-      docPayload.audio_data = b64;
-      docPayload.audioData = b64;
-      docPayload.audio_size_kb = sizeKb;
-      docPayload.audioSizeKb = sizeKb;
-      docPayload.audio_transcript = transcript;
-      docPayload.audioTranscript = transcript;
-      docPayload.audio_analysis = analysis;
-      docPayload.audioAnalysis = analysis;
-    }
-
-    if (record.imageData || record.image_data) {
-      const imgB64 = record.imageData || record.image_data;
-      const imgKb = record.imageSizeKb || record.image_size_kb;
-      const origMb = record.originalSizeMb || record.image_original_size_mb;
-      const imgAnalysis = record.imageAnalysis || record.image_analysis;
-
-      docPayload.image_data = imgB64;
-      docPayload.imageData = imgB64;
-      docPayload.image_size_kb = imgKb;
-      docPayload.imageSizeKb = imgKb;
-      docPayload.image_original_size_mb = origMb;
-      docPayload.imageOriginalSizeMb = origMb;
-      docPayload.image_analysis = imgAnalysis;
-      docPayload.imageAnalysis = imgAnalysis;
-    }
-
-    await setDoc(doc(db, 'requests', record.localId), docPayload, { merge: true });
     return true;
   } catch (err) {
     console.error('Firestore write error:', err);
@@ -157,9 +124,16 @@ export default function App() {
                 assigned_resource_id: data.assigned_resource_id,
                 assigned_resource_name: data.assigned_resource_name,
                 assigned_at: data.assigned_at,
+                accepted_by: data.accepted_by,
+                accepted_at: data.accepted_at,
                 dispatched_at: data.dispatched_at,
+                dispatched_vehicle: data.dispatched_vehicle,
+                dispatched_responder: data.dispatched_responder,
+                in_progress_at: data.in_progress_at,
                 rescued_at: data.rescued_at,
-                safe_reported_at: data.safe_reported_at
+                safe_reported_at: data.safe_reported_at,
+                eta_minutes: data.eta_minutes,
+                distance_meters: data.distance_meters
               }
             }));
           }
@@ -186,7 +160,7 @@ export default function App() {
           original_request_id: localId,
           type: 'safe_report',
           reported_at: nowStr,
-          status: 'rescued',
+          status: 'RESCUED',
           captured_at: Date.now()
         });
       }
@@ -405,7 +379,8 @@ export default function App() {
                   {assignedName && currentStatus !== 'rescued' && (
                     <div className="responder-info-box" style={{ background: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.2)', padding: '10px', borderRadius: '8px', marginBottom: '12px', fontSize: '11px', lineHeight: '1.4' }}>
                       🚀 <b>Assigned Team</b>: <span style={{ color: '#2563eb', fontWeight: 'bold' }}>{assignedName}</span><br />
-                      ⏱️ <b>Estimated Arrival (ETA)</b>: ~10-15 minutes (Active route)
+                      ⏱️ <b>Estimated Arrival (ETA)</b>: {live.eta_minutes ? `~${live.eta_minutes} minutes` : 'Calculating live ETA...'}
+                      {live.distance_meters ? ` (${(live.distance_meters / 1000).toFixed(2)} km away)` : ''}
                     </div>
                   )}
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { db, auth } from './firebaseClient';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, limit, getDocs, addDoc } from 'firebase/firestore';
@@ -1059,6 +1059,25 @@ export default function App() {
     }
   }, [selectedSOS]);
 
+  // Keep selectedSOS in sync with live updates from the requests list (e.g. from the field Rescue App)
+  useEffect(() => {
+    if (!selectedSOS) return;
+    const latest = requests.find(r => r.id === selectedSOS.id);
+    if (latest) {
+      if (
+        latest.status !== selectedSOS.status ||
+        latest.eta_minutes !== selectedSOS.eta_minutes ||
+        latest.distance_meters !== selectedSOS.distance_meters ||
+        latest.assigned_resource_lat !== selectedSOS.assigned_resource_lat ||
+        latest.assigned_resource_lng !== selectedSOS.assigned_resource_lng ||
+        latest.ai_priority !== selectedSOS.ai_priority ||
+        latest.assigned_resource_name !== selectedSOS.assigned_resource_name
+      ) {
+        setSelectedSOS(latest);
+      }
+    }
+  }, [requests, selectedSOS]);
+
   // Generate Situation Report
   const triggerSituationReport = async () => {
     setSituationReportLoading(true);
@@ -1595,12 +1614,18 @@ export default function App() {
                         <div className="step-details" style={{ display: 'flex', flexDirection: 'column' }}>
                           <span className="step-label" style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }}>Team Assigned</span>
                           {selectedSOS.assigned_resource_name ? (
-                            <>
+                            <div className="step-content">
+                              <span className="step-title" style={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }}>Team Assigned</span>
                               <span className="step-desc" style={{ color: 'var(--text)', fontSize: '10px' }}>Team: {selectedSOS.assigned_resource_name}</span>
+                              {selectedSOS.eta_minutes && (
+                                <span className="step-desc" style={{ color: 'var(--accent)', fontSize: '10px', fontWeight: 'bold', display: 'block', marginTop: '3px' }}>
+                                  ⏱️ Live ETA: ~{selectedSOS.eta_minutes} mins ({selectedSOS.distance_meters ? `${(selectedSOS.distance_meters/1000).toFixed(2)} km` : ''})
+                                </span>
+                              )}
                               {selectedSOS.assigned_at && (
                                 <span className="step-time" style={{ color: 'var(--muted)', fontSize: '9px' }}>{new Date(selectedSOS.assigned_at).toLocaleTimeString()}</span>
                               )}
-                            </>
+                            </div>
                           ) : (
                             <span className="step-desc" style={{ color: 'var(--muted)', fontSize: '10px' }}>Unassigned</span>
                           )}
@@ -2190,6 +2215,22 @@ export default function App() {
               </CircleMarker>
             );
           })}
+          {/* Dotted path connecting selected SOS and its assigned rescue resource */}
+          {selectedSOS && (() => {
+            const assignedRes = resources.find(r => r.id === selectedSOS.assigned_resource_id || r.name === selectedSOS.assigned_resource_name);
+            if (selectedSOS.lat && selectedSOS.lng && assignedRes && assignedRes.latitude && assignedRes.longitude) {
+              return (
+                <Polyline
+                  positions={[
+                    [selectedSOS.lat, selectedSOS.lng],
+                    [assignedRes.latitude, assignedRes.longitude]
+                  ]}
+                  pathOptions={{ color: '#FF5A1F', weight: 3, dashArray: '5, 8' }}
+                />
+              );
+            }
+            return null;
+          })()}
         </MapContainer>
       </div>
 

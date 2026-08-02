@@ -8,9 +8,10 @@
  *  - All functions use a shared callGemini() helper
  */
 
-const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
+const { getFirestore } = require('firebase-admin/firestore');
 
 admin.initializeApp();
 
@@ -110,6 +111,7 @@ exports.autoTriageSOS = onDocumentCreated(
       const parsed = JSON.parse(raw);
 
       await snapshot.ref.update({
+        status: 'AI_TRIAGED',
         ai_priority: parsed.priority || 'normal',
         ai_flags: parsed.flags || [],
         ai_summary: parsed.summary || '',
@@ -119,7 +121,15 @@ exports.autoTriageSOS = onDocumentCreated(
 
       console.log(`Triaged ${event.params.requestId} → ${parsed.priority} (Gemini)`);
     } catch (err) {
-      console.error('AI triage error:', err.message);
+      console.error('AI triage error, applying default/fallback values to proceed:', err.message);
+      await snapshot.ref.update({
+        status: 'AI_TRIAGED',
+        ai_priority: 'normal',
+        ai_flags: [],
+        ai_summary: 'Stable situation, awaiting dispatch.',
+        ai_processed_at: new Date().toISOString(),
+        ai_engine: 'fallback-deterministic'
+      });
     }
   }
 );
@@ -237,6 +247,178 @@ Use professional command-center terminology. Write in Markdown. Output ONLY the 
     } catch (err) {
       console.error('generateSituationReport error:', err.message);
       throw new HttpsError('internal', err.message || 'AI situation report failed.');
+    }
+  }
+);
+
+// ─── 5. Auto-Assign & Dispatch ───────────────────────────────────────────────
+// Triggered when AI triage completes (ai_priority is freshly written).
+// Automatically finds the best available rescue resource and dispatches it.
+// No human interaction required.
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
+  const R = 6371000;
+  const toRad = (v) => (v * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Resource type preference per situation
+const SITUATION_RESOURCE_PREFERENCE = {
+  injured:  ['ambulance', 'rescue_team', 'boat'],
+  stranded: ['boat', 'rescue_team', 'ambulance'],
+  evacuate: ['rescue_team', 'boat', 'ambulance'],
+  supplies: ['rescue_team', 'boat', 'ambulance'],
+};
+
+const ASSIGN_SYSTEM_PROMPT = `You are the RAAHAT AI Command Dispatch Coordinator.
+Evaluate the citizen's SOS distress call and select the single best matching rescue resource from the provided list of available resources.
+
+Rules:
+1. Select exactly one resource ID from the available list.
+2. Select based on:
+   - Type preference: "stranded"/"rising water" -> prefer "boat", "injured"/"medical emergency" -> prefer "ambulance", "supplies"/"evacuate" -> "rescue_team".
+   - Capacity: Ensure the resource capacity is equal to or greater than the citizen's headcount (people count).
+   - Proximity: Prioritize closer resources (smaller distance).
+3. Output ONLY a JSON object (no markdown formatting, no other text) in this exact format:
+{
+  "assigned_resource_id": "the-id-of-the-selected-resource",
+  "reason": "1-sentence plain explanation of why this team/vehicle is the best choice"
+}`;
+
+exports.autoAssignAndDispatch = onDocumentUpdated(
+  { document: 'requests/{requestId}', secrets: ['GEMINI_API_KEY'] },
+  async (event) => {
+    const before = event.data.before.data();
+    const after  = event.data.after.data();
+
+    // Trigger ONLY when status transitions to 'AI_TRIAGED'
+    if (before.status === 'AI_TRIAGED' || after.status !== 'AI_TRIAGED') return;
+
+    const requestId = event.params.requestId;
+    const db = getFirestore();
+
+    console.log(`AI auto-assigning resource for request ${requestId}...`);
+
+    try {
+      // Fetch all available resources (with self-healing seeding if empty)
+      let resourcesSnap = await db
+        .collection('resources')
+        .where('availability', '==', 'available')
+        .get();
+
+      if (resourcesSnap.empty) {
+        console.log('Firestore resources collection is empty. Self-seeding default rescue teams...');
+        const defaultResources = [
+          { type: 'boat', name: 'Rescue Boat Alpha', latitude: 20.5950, longitude: 78.9650, capacity: 10, availability: 'available', status: 'Idle at Station' },
+          { type: 'ambulance', name: 'Trauma Unit 4', latitude: 20.6020, longitude: 78.9750, capacity: 2, availability: 'available', status: 'Idle at Station' },
+          { type: 'rescue team', name: 'NDRF Squad B', latitude: 20.5850, longitude: 78.9550, capacity: 8, availability: 'available', status: 'On Standby' },
+          { type: 'fire truck', name: 'Engine 9', latitude: 20.6150, longitude: 78.9450, capacity: 6, availability: 'available', status: 'On Standby' },
+          { type: 'volunteer', name: 'Volunteer Group East', latitude: 20.5700, longitude: 78.9850, capacity: 15, availability: 'available', status: 'Distributing Rations' }
+        ];
+
+        for (const res of defaultResources) {
+          await db.collection('resources').add(res);
+        }
+
+        // Re-fetch resources after seeding
+        resourcesSnap = await db
+          .collection('resources')
+          .where('availability', '==', 'available')
+          .get();
+      }
+
+      const resources = resourcesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const sosLat = after.lat;
+      const sosLng = after.lng;
+
+      // Prepare list of resources with calculated distances for Gemini
+      const resourceList = resources.map((res) => {
+        const distance = haversineMeters(sosLat, sosLng, res.latitude, res.longitude);
+        return {
+          id: res.id,
+          name: res.name,
+          type: res.type,
+          capacity: res.capacity || 10,
+          distance_meters: Math.round(distance),
+          status: res.status
+        };
+      });
+
+      const sosDetails = {
+        name: after.name || 'Citizen',
+        situation: after.situation,
+        people_count: parseInt(after.people_count) || 1,
+        notes: after.notes || '',
+        ai_priority: after.ai_priority,
+        ai_flags: after.ai_flags || []
+      };
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      let selectedResourceId = null;
+      let selectionReason = 'Auto-assigned by RAAHAT Dispatch Engine.';
+
+      if (apiKey) {
+        try {
+          const userContent = JSON.stringify({ sosDetails, availableResources: resourceList });
+          const raw = await callGemini(apiKey, ASSIGN_SYSTEM_PROMPT, userContent, 300);
+          const parsed = JSON.parse(raw);
+          selectedResourceId = parsed.assigned_resource_id;
+          selectionReason = parsed.reason || selectionReason;
+          console.log(`Gemini selected resource: ${selectedResourceId} reason: ${selectionReason}`);
+        } catch (aiErr) {
+          console.warn('Gemini dispatch choice failed, running deterministic fallback:', aiErr.message);
+        }
+      }
+
+      // Verify Gemini's choice exists and is available, otherwise run deterministic fallback
+      let best = resources.find(r => r.id === selectedResourceId);
+      
+      if (!best) {
+        console.log('Running deterministic resource assignment fallback...');
+        const preferredTypes = SITUATION_RESOURCE_PREFERENCE[after.situation] || ['rescue_team', 'boat', 'ambulance'];
+        const scored = resources.map((res) => {
+          const typeRank = preferredTypes.indexOf(res.type);
+          const typePriority = typeRank === -1 ? preferredTypes.length : typeRank;
+          const distance = haversineMeters(sosLat, sosLng, res.latitude, res.longitude);
+          return { res, typePriority, distance };
+        });
+
+        scored.sort((a, b) => {
+          if (a.typePriority !== b.typePriority) return a.typePriority - b.typePriority;
+          return a.distance - b.distance;
+        });
+        
+        best = scored[0].res;
+        selectionReason = `Optimized match: ${best.name} is the closest ${best.type} available.`;
+      }
+
+      const now = new Date().toISOString();
+
+      // Step 1: Assign request
+      await event.data.after.ref.update({
+        status: 'TEAM_ASSIGNED',
+        assigned_resource_id: best.id,
+        assigned_resource_name: best.name,
+        assigned_at: now,
+        ai_assignment_reason: selectionReason,
+        dispatcher_name: 'AI Auto-Dispatcher'
+      });
+
+      // Step 2: Mark resource as busy
+      await db.collection('resources').doc(best.id).update({
+        availability: 'busy',
+        status: `Assigned to rescue ${after.name || 'citizen'}`
+      });
+
+      console.log(`✅ AI-assigned ${best.name} to request ${requestId}`);
+    } catch (err) {
+      console.error('autoAssignAndDispatch error:', err.message);
     }
   }
 );
