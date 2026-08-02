@@ -42,14 +42,21 @@
       --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.4);
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html { scroll-behavior: smooth; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
 
     body {
       width: 100vw;
       min-height: 100vh;
       background: var(--bg);
-      background-image: 
+      background-image:
         radial-gradient(circle at 50% 0%, rgba(255, 106, 0, 0.12) 0%, transparent 65%),
         radial-gradient(circle at 10% 40%, rgba(139, 92, 246, 0.08) 0%, transparent 50%),
         radial-gradient(circle at 90% 70%, rgba(59, 130, 246, 0.08) 0%, transparent 50%);
@@ -65,7 +72,8 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    .landing-wrapper, .landing-container {
+    .landing-wrapper,
+    .landing-container {
       max-width: 1200px;
       width: 100%;
       display: flex;
@@ -100,12 +108,24 @@
     }
 
     @keyframes pulse-dot {
-      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
-      70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
-      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+      }
+
+      70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+      }
+
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+      }
     }
 
-    .hero-header, .brand-header {
+    .hero-header,
+    .brand-header {
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -114,7 +134,8 @@
       max-width: 760px;
     }
 
-    .hero-logo-box, .brand-logo-badge {
+    .hero-logo-box,
+    .brand-logo-badge {
       width: 72px;
       height: 72px;
       background: linear-gradient(135deg, #FF4D4F 0%, #FF6A00 100%);
@@ -126,7 +147,8 @@
       transition: var(--transition);
     }
 
-    .hero-title, .brand-title {
+    .hero-title,
+    .brand-title {
       font-size: 44px;
       font-weight: 900;
       line-height: 1.15;
@@ -136,20 +158,23 @@
       -webkit-text-fill-color: transparent;
     }
 
-    .hero-title span, .brand-title span {
+    .hero-title span,
+    .brand-title span {
       background: linear-gradient(135deg, #FF6A00 0%, #FF4D4F 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
-    .hero-subtitle, .brand-tagline {
+    .hero-subtitle,
+    .brand-tagline {
       font-size: 16px;
       color: var(--text-secondary);
       line-height: 1.6;
       max-width: 640px;
     }
 
-    .workflow-container, .flow-section {
+    .workflow-container,
+    .flow-section {
       width: 100%;
       background: var(--bg-card);
       border: 1px solid var(--border);
@@ -162,7 +187,8 @@
       box-shadow: var(--shadow-lg);
     }
 
-    .workflow-header, .flow-title-bar {
+    .workflow-header,
+    .flow-title-bar {
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -170,7 +196,8 @@
       gap: 6px;
     }
 
-    .workflow-header h2, .flow-section-title {
+    .workflow-header h2,
+    .flow-section-title {
       font-size: 22px;
       font-weight: 800;
       color: var(--text-primary);
@@ -179,12 +206,14 @@
       gap: 10px;
     }
 
-    .workflow-header p, .flow-section-sub {
+    .workflow-header p,
+    .flow-section-sub {
       font-size: 13px;
       color: var(--text-muted);
     }
 
-    .workflow-steps-grid, .flow-steps-grid {
+    .workflow-steps-grid,
+    .flow-steps-grid {
       display: grid;
       grid-template-columns: repeat(5, 1fr);
       gap: 18px;
@@ -192,7 +221,8 @@
       position: relative;
     }
 
-    .workflow-steps-grid::before, .flow-steps-grid::before {
+    .workflow-steps-grid::before,
+    .flow-steps-grid::before {
       content: '';
       position: absolute;
       top: 44px;
@@ -204,7 +234,8 @@
       z-index: 1;
     }
 
-    .step-card, .flow-step-card {
+    .step-card,
+    .flow-step-card {
       background: rgba(10, 14, 20, 0.7);
       border: 1px solid var(--border);
       border-radius: var(--radius-md);
@@ -221,14 +252,16 @@
       justify-content: flex-start;
     }
 
-    .step-card:hover, .flow-step-card:hover {
+    .step-card:hover,
+    .flow-step-card:hover {
       transform: translateY(-6px);
       border-color: var(--border-glow);
       background: rgba(24, 34, 48, 0.85);
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     }
 
-    .step-badge, .step-num-badge {
+    .step-badge,
+    .step-num-badge {
       width: 44px;
       height: 44px;
       border-radius: 50%;
@@ -242,13 +275,48 @@
       z-index: 2;
     }
 
-    .step-badge.red, .step-num-badge.red { background: rgba(255, 77, 79, 0.15); color: var(--red); border: 1.5px solid var(--red); box-shadow: 0 0 14px var(--red-glow); }
-    .step-badge.purple, .step-num-badge.purple { background: rgba(139, 92, 246, 0.15); color: var(--purple); border: 1.5px solid var(--purple); box-shadow: 0 0 14px var(--purple-glow); }
-    .step-badge.orange, .step-num-badge.orange { background: rgba(255, 106, 0, 0.15); color: var(--orange); border: 1.5px solid var(--orange); box-shadow: 0 0 14px var(--orange-glow); }
-    .step-badge.blue, .step-num-badge.blue { background: rgba(59, 130, 246, 0.15); color: var(--blue); border: 1.5px solid var(--blue); box-shadow: 0 0 14px var(--blue-glow); }
-    .step-badge.green, .step-num-badge.green { background: rgba(34, 197, 94, 0.15); color: var(--green); border: 1.5px solid var(--green); box-shadow: 0 0 14px var(--green-glow); }
+    .step-badge.red,
+    .step-num-badge.red {
+      background: rgba(255, 77, 79, 0.15);
+      color: var(--red);
+      border: 1.5px solid var(--red);
+      box-shadow: 0 0 14px var(--red-glow);
+    }
 
-    .step-tag, .step-portal-tag {
+    .step-badge.purple,
+    .step-num-badge.purple {
+      background: rgba(139, 92, 246, 0.15);
+      color: var(--purple);
+      border: 1.5px solid var(--purple);
+      box-shadow: 0 0 14px var(--purple-glow);
+    }
+
+    .step-badge.orange,
+    .step-num-badge.orange {
+      background: rgba(255, 106, 0, 0.15);
+      color: var(--orange);
+      border: 1.5px solid var(--orange);
+      box-shadow: 0 0 14px var(--orange-glow);
+    }
+
+    .step-badge.blue,
+    .step-num-badge.blue {
+      background: rgba(59, 130, 246, 0.15);
+      color: var(--blue);
+      border: 1.5px solid var(--blue);
+      box-shadow: 0 0 14px var(--blue-glow);
+    }
+
+    .step-badge.green,
+    .step-num-badge.green {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--green);
+      border: 1.5px solid var(--green);
+      box-shadow: 0 0 14px var(--green-glow);
+    }
+
+    .step-tag,
+    .step-portal-tag {
       font-size: 9.5px;
       font-weight: 800;
       padding: 3px 10px;
@@ -257,19 +325,45 @@
       letter-spacing: 0.05em;
     }
 
-    .step-tag.red, .step-portal-tag.red { background: rgba(255, 77, 79, 0.15); color: var(--red); }
-    .step-tag.purple, .step-portal-tag.purple { background: rgba(139, 92, 246, 0.15); color: var(--purple); }
-    .step-tag.orange, .step-portal-tag.orange { background: rgba(255, 106, 0, 0.15); color: var(--orange); }
-    .step-tag.blue, .step-portal-tag.blue { background: rgba(59, 130, 246, 0.15); color: var(--blue); }
-    .step-tag.green, .step-portal-tag.green { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+    .step-tag.red,
+    .step-portal-tag.red {
+      background: rgba(255, 77, 79, 0.15);
+      color: var(--red);
+    }
 
-    .step-card-title, .step-title {
+    .step-tag.purple,
+    .step-portal-tag.purple {
+      background: rgba(139, 92, 246, 0.15);
+      color: var(--purple);
+    }
+
+    .step-tag.orange,
+    .step-portal-tag.orange {
+      background: rgba(255, 106, 0, 0.15);
+      color: var(--orange);
+    }
+
+    .step-tag.blue,
+    .step-portal-tag.blue {
+      background: rgba(59, 130, 246, 0.15);
+      color: var(--blue);
+    }
+
+    .step-tag.green,
+    .step-portal-tag.green {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--green);
+    }
+
+    .step-card-title,
+    .step-title {
       font-size: 14px;
       font-weight: 800;
       color: var(--text-primary);
     }
 
-    .step-card-desc, .step-desc {
+    .step-card-desc,
+    .step-desc {
       font-size: 11.5px;
       color: var(--text-muted);
       line-height: 1.5;
@@ -289,7 +383,8 @@
       color: var(--text-primary);
     }
 
-    .portal-grid, .portal-cards-grid {
+    .portal-grid,
+    .portal-cards-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 28px;
@@ -326,9 +421,17 @@
       transition: var(--transition);
     }
 
-    .portal-card.red:hover::before { background: var(--red); }
-    .portal-card.orange:hover::before { background: var(--orange); }
-    .portal-card.blue:hover::before { background: var(--blue); }
+    .portal-card.red:hover::before {
+      background: var(--red);
+    }
+
+    .portal-card.orange:hover::before {
+      background: var(--orange);
+    }
+
+    .portal-card.blue:hover::before {
+      background: var(--blue);
+    }
 
     .portal-card:hover {
       transform: translateY(-8px);
@@ -337,7 +440,8 @@
       box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
     }
 
-    .portal-card-icon, .portal-icon {
+    .portal-card-icon,
+    .portal-icon {
       width: 60px;
       height: 60px;
       border-radius: 16px;
@@ -348,23 +452,43 @@
       transition: var(--transition);
     }
 
-    .portal-card-icon.red, .portal-icon.red { background: rgba(255, 77, 79, 0.12); color: var(--red); border: 1px solid rgba(255, 77, 79, 0.25); }
-    .portal-card-icon.orange, .portal-icon.orange { background: rgba(255, 106, 0, 0.12); color: var(--orange); border: 1px solid rgba(255, 106, 0, 0.25); }
-    .portal-card-icon.blue, .portal-icon.blue { background: rgba(59, 130, 246, 0.12); color: var(--blue); border: 1px solid rgba(59, 130, 246, 0.25); }
+    .portal-card-icon.red,
+    .portal-icon.red {
+      background: rgba(255, 77, 79, 0.12);
+      color: var(--red);
+      border: 1px solid rgba(255, 77, 79, 0.25);
+    }
 
-    .portal-card-title, .portal-title {
+    .portal-card-icon.orange,
+    .portal-icon.orange {
+      background: rgba(255, 106, 0, 0.12);
+      color: var(--orange);
+      border: 1px solid rgba(255, 106, 0, 0.25);
+    }
+
+    .portal-card-icon.blue,
+    .portal-icon.blue {
+      background: rgba(59, 130, 246, 0.12);
+      color: var(--blue);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+    }
+
+    .portal-card-title,
+    .portal-title {
       font-size: 20px;
       font-weight: 800;
       color: var(--text-primary);
     }
 
-    .portal-card-desc, .portal-desc {
+    .portal-card-desc,
+    .portal-desc {
       font-size: 13px;
       color: var(--text-secondary);
       line-height: 1.6;
     }
 
-    .portal-card-btn, .portal-action-btn {
+    .portal-card-btn,
+    .portal-action-btn {
       width: 100%;
       padding: 14px;
       border-radius: var(--radius-md);
@@ -377,9 +501,26 @@
       margin-top: auto;
     }
 
-    .portal-card.red:hover .portal-card-btn, .portal-card.red:hover .portal-action-btn { background: var(--red); border-color: var(--red); color: #fff; }
-    .portal-card.orange:hover .portal-card-btn, .portal-card.orange:hover .portal-action-btn { background: var(--orange); border-color: var(--orange); color: #fff; }
-    .portal-card.blue:hover .portal-card-btn, .portal-card.blue:hover .portal-action-btn { background: var(--blue); border-color: var(--blue); color: #fff; }
+    .portal-card.red:hover .portal-card-btn,
+    .portal-card.red:hover .portal-action-btn {
+      background: var(--red);
+      border-color: var(--red);
+      color: #fff;
+    }
+
+    .portal-card.orange:hover .portal-card-btn,
+    .portal-card.orange:hover .portal-action-btn {
+      background: var(--orange);
+      border-color: var(--orange);
+      color: #fff;
+    }
+
+    .portal-card.blue:hover .portal-card-btn,
+    .portal-card.blue:hover .portal-action-btn {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
 
     .features-grid {
       display: grid;
@@ -419,7 +560,8 @@
       line-height: 1.5;
     }
 
-    .landing-footer, .footer-text {
+    .landing-footer,
+    .footer-text {
       width: 100%;
       display: flex;
       flex-direction: column;
@@ -433,24 +575,69 @@
     }
 
     @media (max-width: 1024px) {
-      .workflow-steps-grid, .flow-steps-grid { grid-template-columns: repeat(3, 1fr); }
-      .workflow-steps-grid::before, .flow-steps-grid::before { display: none; }
-      .portal-grid, .portal-cards-grid { grid-template-columns: repeat(3, 1fr); gap: 16px; }
-      .features-grid { grid-template-columns: repeat(2, 1fr); }
+
+      .workflow-steps-grid,
+      .flow-steps-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+
+      .workflow-steps-grid::before,
+      .flow-steps-grid::before {
+        display: none;
+      }
+
+      .portal-grid,
+      .portal-cards-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+
+      .features-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
     }
 
     @media (max-width: 768px) {
-      body { padding: 24px 16px 40px; }
-      .hero-title, .brand-title { font-size: 32px; }
-      .hero-subtitle, .brand-tagline { font-size: 14px; }
-      .workflow-steps-grid, .flow-steps-grid { grid-template-columns: repeat(2, 1fr); }
-      .portal-grid, .portal-cards-grid { grid-template-columns: 1fr; }
-      .features-grid { grid-template-columns: 1fr; }
+      body {
+        padding: 24px 16px 40px;
+      }
+
+      .hero-title,
+      .brand-title {
+        font-size: 32px;
+      }
+
+      .hero-subtitle,
+      .brand-tagline {
+        font-size: 14px;
+      }
+
+      .workflow-steps-grid,
+      .flow-steps-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .portal-grid,
+      .portal-cards-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .features-grid {
+        grid-template-columns: 1fr;
+      }
     }
 
     @media (max-width: 480px) {
-      .workflow-steps-grid, .flow-steps-grid { grid-template-columns: 1fr; }
-      .hero-title, .brand-title { font-size: 26px; }
+
+      .workflow-steps-grid,
+      .flow-steps-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-title,
+      .brand-title {
+        font-size: 26px;
+      }
     }
   </style>
 </head>
@@ -476,7 +663,8 @@
       </div>
       <h1 class="hero-title brand-title">Raahat Disaster <span>SOS Ecosystem</span></h1>
       <p class="hero-subtitle brand-tagline">
-        Unified multi-application emergency management platform connecting citizens in flood zones, government command centers, and field rescue responder teams in real time.
+        Unified multi-application emergency management platform connecting citizens in flood zones, government command
+        centers, and field rescue responder teams in real time.
       </p>
     </header>
 
@@ -486,7 +674,8 @@
         <h2 class="flow-section-title">
           <span>⚡</span> End-to-End Emergency Response Sequence
         </h2>
-        <p class="flow-section-sub">Autonomous AI cloud triage and real-time synchronization between citizens, dispatchers, and field units.</p>
+        <p class="flow-section-sub">Autonomous AI cloud triage and real-time synchronization between citizens,
+          dispatchers, and field units.</p>
       </div>
 
       <div class="workflow-steps-grid flow-steps-grid">
@@ -495,7 +684,8 @@
           <div class="step-badge step-num-badge red">1</div>
           <span class="step-tag step-portal-tag red">Citizen SOS App</span>
           <h3 class="step-card-title step-title">🚨 Broadcast SOS</h3>
-          <p class="step-card-desc step-desc">Citizen submits distress signal with GPS location, headcount, and voice/photo evidence (works online or offline-queued).</p>
+          <p class="step-card-desc step-desc">Citizen submits distress signal with GPS location, headcount, and
+            voice/photo evidence (works online or offline-queued).</p>
         </div>
 
         <!-- Step 2 -->
@@ -503,7 +693,8 @@
           <div class="step-badge step-num-badge purple">2</div>
           <span class="step-tag step-portal-tag purple">Cloud AI Triage</span>
           <h3 class="step-card-title step-title">🤖 Claude 3.5 AI</h3>
-          <p class="step-card-desc step-desc">Firebase Cloud Function automatically analyzes notes, extracts hazard flags, and calculates critical priority scores.</p>
+          <p class="step-card-desc step-desc">Firebase Cloud Function automatically analyzes notes, extracts hazard
+            flags, and calculates critical priority scores.</p>
         </div>
 
         <!-- Step 3 -->
@@ -511,7 +702,8 @@
           <div class="step-badge step-num-badge orange">3</div>
           <span class="step-tag step-portal-tag orange">Command Center</span>
           <h3 class="step-card-title step-title">🏛️ GIS Dispatch</h3>
-          <p class="step-card-desc step-desc">Command team inspects satellite map, evaluates deterministic hospital/shelter matching, and dispatches rescue teams.</p>
+          <p class="step-card-desc step-desc">Command team inspects satellite map, evaluates deterministic
+            hospital/shelter matching, and dispatches rescue teams.</p>
         </div>
 
         <!-- Step 4 -->
@@ -519,7 +711,8 @@
           <div class="step-badge step-num-badge blue">4</div>
           <span class="step-tag step-portal-tag blue">Rescue Squad</span>
           <h3 class="step-card-title step-title">🚒 Field Response</h3>
-          <p class="step-card-desc step-desc">Field rescue teams receive instant dispatch notifications, navigate to the victim's location, and execute rescue operations.</p>
+          <p class="step-card-desc step-desc">Field rescue teams receive instant dispatch notifications, navigate to the
+            victim's location, and execute rescue operations.</p>
         </div>
 
         <!-- Step 5 -->
@@ -527,37 +720,41 @@
           <div class="step-badge step-num-badge green">5</div>
           <span class="step-tag step-portal-tag green">Live Sync</span>
           <h3 class="step-card-title step-title">✅ Rescued & Safe</h3>
-          <p class="step-card-desc step-desc">Squad marks victim safe, automatically updating the citizen's live status tracker in real time.</p>
+          <p class="step-card-desc step-desc">Squad marks victim safe, automatically updating the citizen's live status
+            tracker in real time.</p>
         </div>
       </div>
     </section>
 
-    <!-- 3 Primary Portal Entry Cards (Interactive Anchor Cards with target="_self") -->
+    <!-- 3 Primary Portal Entry Cards (Interactive Anchor Cards with target="_blank") -->
     <section class="portals-section">
       <h2 class="portals-section-header">Select Platform Application</h2>
 
       <div class="portal-grid portal-cards-grid">
         <!-- 1. Citizen SOS App -->
-        <a href="https://raahat-citizen.web.app" target="_self" class="portal-card red">
+        <a href="https://raahat-citizen.web.app" target="_blank" class="portal-card red">
           <div class="portal-card-icon portal-icon red">🚨</div>
           <h3 class="portal-card-title portal-title">Citizen SOS App</h3>
-          <p class="portal-card-desc portal-desc">Progressive Web App for citizens to broadcast immediate distress signals, attach photo/voice evidence, and view live status tracking.</p>
+          <p class="portal-card-desc portal-desc">Progressive Web App for citizens to broadcast immediate distress
+            signals, attach photo/voice evidence, and view live status tracking.</p>
           <div class="portal-card-btn portal-action-btn">Launch Citizen SOS →</div>
         </a>
 
         <!-- 2. Command Dashboard -->
-        <a href="https://raahat-dashboard.web.app" target="_self" class="portal-card orange">
+        <a href="https://raahat-dashboard.web.app" target="_blank" class="portal-card orange">
           <div class="portal-card-icon portal-icon orange">🏛️</div>
           <h3 class="portal-card-title portal-title">Command Dashboard</h3>
-          <p class="portal-card-desc portal-desc">Government command center portal for AI incident triage, satellite GIS tracking, resource allocation, and predictive flood telemetry.</p>
+          <p class="portal-card-desc portal-desc">Government command center portal for AI incident triage, satellite GIS
+            tracking, resource allocation, and predictive flood telemetry.</p>
           <div class="portal-card-btn portal-action-btn">Open Command Center →</div>
         </a>
 
         <!-- 3. Rescue Team Dashboard -->
-        <a href="https://raahat-rescue.web.app" target="_self" class="portal-card blue">
+        <a href="https://raahat-rescue.web.app" target="_blank" class="portal-card blue">
           <div class="portal-card-icon portal-icon blue">🚒</div>
           <h3 class="portal-card-title portal-title">Rescue Team Portal</h3>
-          <p class="portal-card-desc portal-desc">Field responder portal for NDRF squads and emergency units to receive live dispatch assignments and track operational progress.</p>
+          <p class="portal-card-desc portal-desc">Field responder portal for NDRF squads and emergency units to receive
+            live dispatch assignments and track operational progress.</p>
           <div class="portal-card-btn portal-action-btn">Access Field Portal →</div>
         </a>
       </div>
@@ -567,22 +764,26 @@
     <section class="features-grid">
       <div class="feature-item">
         <div class="feature-item-title">📡 Offline-First PWA</div>
-        <p class="feature-item-desc">IndexedDB local queue preserves distress signals when cellular signal drops and syncs immediately upon reconnection.</p>
+        <p class="feature-item-desc">IndexedDB local queue preserves distress signals when cellular signal drops and
+          syncs immediately upon reconnection.</p>
       </div>
 
       <div class="feature-item">
         <div class="feature-item-title">🤖 Claude 3.5 AI Triage</div>
-        <p class="feature-item-desc">Automated LLM classification reads notes to extract hazard flags (`structural_danger`, `injured`) and score priority.</p>
+        <p class="feature-item-desc">Automated LLM classification reads notes to extract hazard flags
+          (`structural_danger`, `injured`) and score priority.</p>
       </div>
 
       <div class="feature-item">
         <div class="feature-item-title">🌊 Open-Meteo Telemetry</div>
-        <p class="feature-item-desc">3-hour automated background job computes 48h precipitation & 72h river discharge to issue early flood warnings.</p>
+        <p class="feature-item-desc">3-hour automated background job computes 48h precipitation & 72h river discharge to
+          issue early flood warnings.</p>
       </div>
 
       <div class="feature-item">
         <div class="feature-item-title">📐 Deterministic Match</div>
-        <p class="feature-item-desc">Mathematical weighted scoring matches victims to closest available hospitals and shelters with positive capacity.</p>
+        <p class="feature-item-desc">Mathematical weighted scoring matches victims to closest available hospitals and
+          shelters with positive capacity.</p>
       </div>
     </section>
 
