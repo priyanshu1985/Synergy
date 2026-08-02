@@ -3,6 +3,8 @@ import { db } from './firebaseClient';
 import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { saveLocal, getAllLocal } from './db';
 import './styles.css';
+import VoiceSOSModal from './components/VoiceSOSModal';
+import PhotoSOSModal from './components/PhotoSOSModal';
 
 const SITUATIONS = [
   { value: 'stranded', label: 'Stranded / water rising' },
@@ -19,7 +21,7 @@ async function trySend(record) {
     return false;
   }
   try {
-    await setDoc(doc(db, 'requests', record.localId), {
+    const docPayload = {
       id: record.localId,
       local_id: record.localId,
       name: record.name,
@@ -33,14 +35,47 @@ async function trySend(record) {
       captured_at: record.capturedAt,
       received_at: new Date().toISOString(),
       status: 'pending'
-    }, { merge: true });
+    };
+
+    if (record.audioData || record.audio_data) {
+      const b64 = record.audioData || record.audio_data;
+      const sizeKb = record.audioSizeKb || record.audio_size_kb;
+      const transcript = record.audioTranscript || record.audio_transcript;
+      const analysis = record.audioAnalysis || record.audio_analysis;
+
+      docPayload.audio_data = b64;
+      docPayload.audioData = b64;
+      docPayload.audio_size_kb = sizeKb;
+      docPayload.audioSizeKb = sizeKb;
+      docPayload.audio_transcript = transcript;
+      docPayload.audioTranscript = transcript;
+      docPayload.audio_analysis = analysis;
+      docPayload.audioAnalysis = analysis;
+    }
+
+    if (record.imageData || record.image_data) {
+      const imgB64 = record.imageData || record.image_data;
+      const imgKb = record.imageSizeKb || record.image_size_kb;
+      const origMb = record.originalSizeMb || record.image_original_size_mb;
+      const imgAnalysis = record.imageAnalysis || record.image_analysis;
+
+      docPayload.image_data = imgB64;
+      docPayload.imageData = imgB64;
+      docPayload.image_size_kb = imgKb;
+      docPayload.imageSizeKb = imgKb;
+      docPayload.image_original_size_mb = origMb;
+      docPayload.imageOriginalSizeMb = origMb;
+      docPayload.image_analysis = imgAnalysis;
+      docPayload.imageAnalysis = imgAnalysis;
+    }
+
+    await setDoc(doc(db, 'requests', record.localId), docPayload, { merge: true });
     return true;
   } catch (err) {
     console.error('Firestore write error:', err);
     return false;
   }
 }
-
 
 export default function App() {
   const [name, setName] = useState('');
@@ -57,9 +92,51 @@ export default function App() {
   const coordsRef = useRef(null);
   const [liveStatuses, setLiveStatuses] = useState({});
 
+  // Voice SOS States
+  const [isVoiceModalOpen, setIsVoiceModalOpen] = useState(false);
+  const [voiceRecordData, setVoiceRecordData] = useState(null);
+
+  // Photo SOS States
+  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
+  const [photoRecordData, setPhotoRecordData] = useState(null);
+
+  const handleVoiceRecorded = (recordedData) => {
+    setVoiceRecordData(recordedData);
+    const { analysis, transcript } = recordedData;
+
+    if (analysis) {
+      if (analysis.situation) {
+        setSituation(analysis.situation);
+      }
+      if (analysis.peopleCount) {
+        setPeople(analysis.peopleCount);
+      }
+      let autoNotes = [];
+      if (analysis.locationHint) {
+        autoNotes.push(`📍 ${analysis.locationHint}`);
+      }
+      if (transcript && transcript !== '(Audio recorded - spoken text unavailable)') {
+        autoNotes.push(`🎙️ Voice Transcript: "${transcript}"`);
+      }
+      if (autoNotes.length > 0) {
+        setNotes((prev) => (prev ? `${prev}\n${autoNotes.join(' · ')}` : autoNotes.join(' · ')));
+      }
+    }
+  };
+
+  const handlePhotoRecorded = (photoData) => {
+    setPhotoRecordData(photoData);
+  };
+
+  const clearVoiceRecord = () => {
+    setVoiceRecordData(null);
+  };
+
+  const clearPhotoRecord = () => {
+    setPhotoRecordData(null);
+  };
+
   // Real-time status tracking via Firestore onSnapshot
-  // Firestore rules now allow public reads (allow read: if true)
-  // so citizens get instant updates the moment the dashboard takes action.
   useEffect(() => {
     if (!db) return;
     const activeReqs = queue.filter(r => r.status === 'sent' && !r.markedSafe);
@@ -87,7 +164,9 @@ export default function App() {
             }));
           }
         },
-        (err) => console.warn('Live status listener error:', err.code)
+        (err) => {
+          console.warn('Status subscription error:', err.code);
+        }
       )
     );
 
@@ -101,9 +180,6 @@ export default function App() {
     try {
       const nowStr = new Date().toISOString();
       if (db) {
-        // Write a new "safe report" document into the requests collection.
-        // This is a CREATE operation — allowed by current Firestore rules (allow create: if true).
-        // Uses a _safe suffix so the dashboard can correlate it back to the original request.
         const safeDocId = `${localId}_safe`;
         await setDoc(doc(db, 'requests', safeDocId), {
           id: safeDocId,
@@ -115,7 +191,6 @@ export default function App() {
         });
       }
 
-      // Update local IndexedDB record
       const all = await getAllLocal();
       const match = all.find(r => r.localId === localId);
       if (match) {
@@ -146,7 +221,6 @@ export default function App() {
   };
 
   useEffect(() => {
-    // GPS — start watching immediately so coordinates are ready before SOS is pressed
     if ('geolocation' in navigator) {
       const watchId = navigator.geolocation.watchPosition(
         (pos) => {
@@ -180,7 +254,7 @@ export default function App() {
     window.addEventListener('online', goOnline);
     window.addEventListener('offline', goOffline);
     refreshQueue();
-    flushQueue(); // catch anything queued from a previous visit
+    flushQueue();
     return () => {
       window.removeEventListener('online', goOnline);
       window.removeEventListener('offline', goOffline);
@@ -188,8 +262,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Periodically retry sending queued items (every 15s) in case of poor signal
-    // where the browser reports 'online' but requests initially timed out.
     const interval = setInterval(() => {
       const hasQueued = queue.some((r) => r.status === 'queued');
       if (hasQueued) {
@@ -209,7 +281,6 @@ export default function App() {
     const n = name.trim() || 'Not given';
     const p = phone.trim() || 'Not given';
 
-    // Duplicate Prevention Check (5 mins threshold)
     const isDuplicate = queue.some(r => {
       const matchName = r.name === n;
       const matchPhone = r.phone === p;
@@ -231,13 +302,25 @@ export default function App() {
       name: n,
       phone: p,
       peopleCount: people.trim() || '1',
-      situation,
+      situation: situation,
       notes: notes.trim(),
       lat: coords ? coords.lat : null,
       lng: coords ? coords.lng : null,
       accuracy: coords ? coords.accuracy : null,
       capturedAt: Date.now(),
-      status: 'queued'
+      status: 'queued',
+      ...(voiceRecordData ? {
+        audioData: voiceRecordData.audioData,
+        audioSizeKb: voiceRecordData.audioSizeKb,
+        audioTranscript: voiceRecordData.transcript,
+        audioAnalysis: voiceRecordData.analysis
+      } : {}),
+      ...(photoRecordData ? {
+        imageData: photoRecordData.imageData,
+        imageSizeKb: photoRecordData.compressedSizeKb,
+        originalSizeMb: photoRecordData.originalSizeMb,
+        imageAnalysis: photoRecordData.analysis
+      } : {})
     };
 
     await saveLocal(record);
@@ -246,11 +329,12 @@ export default function App() {
       record.status = 'sent';
       await saveLocal(record);
     } else {
-      // Trigger a retry soon in case of flaky network
       setTimeout(flushQueue, 5000);
     }
 
     setBtnState('saved');
+    setVoiceRecordData(null);
+    setPhotoRecordData(null);
     setTimeout(() => setBtnState('idle'), 3500);
     refreshQueue();
   };
@@ -284,14 +368,13 @@ export default function App() {
               const live = liveStatuses[r.localId] || {};
               const currentStatus = live.status || 'pending';
               const assignedName = live.assigned_resource_name;
-              
-              // Stepper checklist mapping
-              const step1 = true; // Received
-              const step2 = !!live.ai_priority; // AI Priority triaged
+
+              const step1 = true;
+              const step2 = !!live.ai_priority;
               const step3 = currentStatus === 'team_assigned' || currentStatus === 'dispatched' || currentStatus === 'rescued' || !!assignedName;
               const step4 = currentStatus === 'dispatched' || currentStatus === 'rescued';
               const step5 = currentStatus === 'rescued';
-              
+
               return (
                 <div key={r.localId} className="tracker-card" style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px dashed var(--line)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -301,10 +384,8 @@ export default function App() {
                     </span>
                   </div>
 
-                  {/* Stepper progress circles */}
                   <div className="tracker-stepper" style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', margin: '20px 0 16px 0' }}>
                     <div style={{ position: 'absolute', top: '9px', left: '10px', right: '10px', height: '2px', background: 'var(--line)', zIndex: 1 }}></div>
-                    
                     {[
                       { active: step1, label: 'Received' },
                       { active: step2, label: 'Triage' },
@@ -345,6 +426,61 @@ export default function App() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* PROMINENT VOICE & PHOTO SOS TRIGGER BUTTONS */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
+          <button
+            type="button"
+            className="voice-sos-trigger-btn"
+            style={{ marginBottom: 0, padding: '12px' }}
+            onClick={() => setIsVoiceModalOpen(true)}
+          >
+            <span className="mic-pulse-dot"></span>
+            🎤 VOICE SOS
+          </button>
+
+          <button
+            type="button"
+            className="photo-sos-trigger-btn"
+            style={{ marginBottom: 0, padding: '12px' }}
+            onClick={() => setIsPhotoModalOpen(true)}
+          >
+            📷 PHOTO SOS
+          </button>
+        </div>
+
+        {/* Voice SOS Attachment Preview Banner */}
+        {voiceRecordData && (
+          <div className="voice-sos-attached-banner">
+            <div className="info">
+              <span style={{ fontWeight: 'bold', color: '#2563eb' }}>🎙️ Voice SOS Attached ({voiceRecordData.audioSizeKb} KB)</span>
+              <span style={{ color: '#6B7280', fontStyle: 'italic' }}>
+                "{voiceRecordData.transcript.slice(0, 45)}{voiceRecordData.transcript.length > 45 ? '...' : ''}"
+              </span>
+            </div>
+            <button type="button" className="remove-voice-btn" onClick={clearVoiceRecord}>
+              ✕ Remove
+            </button>
+          </div>
+        )}
+
+        {/* Photo SOS Attachment Preview Banner */}
+        {photoRecordData && (
+          <div className="photo-sos-attached-banner">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <img src={photoRecordData.imageData} alt="Attached SOS" className="attached-thumb" />
+              <div className="info">
+                <span style={{ fontWeight: 'bold', color: '#0284C7' }}>📷 Photo Attached ({photoRecordData.compressedSizeKb} KB)</span>
+                <span style={{ color: '#6B7280' }}>
+                  {photoRecordData.originalSizeMb} MB → {photoRecordData.compressedSizeKb} KB ({photoRecordData.reductionPercent}% smaller)
+                </span>
+              </div>
+            </div>
+            <button type="button" className="remove-voice-btn" onClick={clearPhotoRecord}>
+              ✕ Remove
+            </button>
           </div>
         )}
 
@@ -427,6 +563,20 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {/* Voice SOS Modal */}
+      <VoiceSOSModal
+        isOpen={isVoiceModalOpen}
+        onClose={() => setIsVoiceModalOpen(false)}
+        onVoiceRecorded={handleVoiceRecorded}
+      />
+
+      {/* Photo SOS Modal */}
+      <PhotoSOSModal
+        isOpen={isPhotoModalOpen}
+        onClose={() => setIsPhotoModalOpen(false)}
+        onPhotoRecorded={handlePhotoRecorded}
+      />
     </div>
   );
 }

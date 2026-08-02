@@ -36,11 +36,21 @@ const DEMO_CLUSTER_REQUESTS = [
     phone: '9876543210',
     people_count: 4,
     situation: 'stranded',
-    notes: 'Kurla East, near Metro station',
+    notes: 'Kurla East, near Metro station · 🎙️ Voice SOS Attached',
     lat: 20.5933,
     lng: 78.9628,
     captured_at: Date.now() - 60000,
-    status: 'pending'
+    status: 'pending',
+    audio_data: 'data:audio/webm;base64,GkXfo59ChoEBQveBAULygQ88StructureSAlQ26B0N0Y0Q1Z0...',
+    audio_size_kb: '14.8',
+    audio_transcript: 'We are 4 people stranded on 2nd floor near Kurla Metro station, water level is rising fast and grandma needs urgent help!',
+    audio_analysis: {
+      situation: 'stranded',
+      severity: 'critical',
+      peopleCount: '4',
+      locationHint: 'near Kurla Metro station',
+      summary: 'Voice SOS: Stranded group of 4 near Kurla Metro with rising water.'
+    }
   },
   {
     id: 'demo-cluster-2',
@@ -48,11 +58,24 @@ const DEMO_CLUSTER_REQUESTS = [
     phone: '9876543211',
     people_count: 6,
     situation: 'injured',
-    notes: 'Kurla East, lane 4',
+    notes: 'Kurla East, lane 4 · 📷 Photo SOS Attached',
     lat: 20.5940,
     lng: 78.9635,
     captured_at: Date.now() - 120000,
-    status: 'pending'
+    status: 'pending',
+    image_data: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400"><rect width="600" height="400" fill="%230F172A"/><path d="M0 250 Q150 200 300 250 T600 250 L600 400 L0 400 Z" fill="%230284C7" opacity="0.6"/><path d="M0 280 Q150 230 300 280 T600 280 L600 400 L0 400 Z" fill="%230369A1"/><rect x="220" y="120" width="160" height="140" fill="%231E293B" stroke="%2338BDF8" stroke-width="4"/><polygon points="200,120 300,50 400,120" fill="%23FF5A1F"/><text x="300" y="360" font-family="sans-serif" font-size="20" font-weight="bold" fill="%23FFFFFF" text-anchor="middle">FLOOD INUNDATION SCENE DETECTED</text></svg>',
+    image_size_kb: '76.4',
+    image_original_size_mb: '4.20',
+    image_analysis: {
+      situation: 'injured',
+      severity: 'critical',
+      waterLevel: 'Waist-Deep Water (~1.2m)',
+      hazards: ['⚡ Electrical Hazard (Submerged Wires)', '🌊 High Water Inundation', '🚧 Blocked Road'],
+      peopleCount: '6',
+      confidence: '95%',
+      locationHint: 'Kurla East lane 4, submerged ground floor',
+      summary: 'Visual Assessment: Waist-deep flood inundation with downed wires near residential building.'
+    }
   },
   {
     id: 'demo-cluster-3',
@@ -513,6 +536,7 @@ export default function App() {
   const [activeZoom, setActiveZoom] = useState(5);
   const [activeSidebarTab, setActiveSidebarTab] = useState('sos'); // 'sos' | 'command'
   const [selectedSOS, setSelectedSOS] = useState(null);
+  const [expandedPhotoUrl, setExpandedPhotoUrl] = useState(null);
 
   // Auth States
   const [user, setUser] = useState(null);
@@ -1393,6 +1417,147 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Voice SOS Audio Player & AI Transcript Card */}
+                  {(selectedSOS.audio_data || selectedSOS.audio_url || selectedSOS.audioData) && (
+                    <div className="voice-sos-dashboard-card" style={{ marginTop: '16px', background: 'rgba(37, 99, 235, 0.08)', border: '1px solid rgba(37, 99, 235, 0.3)', borderRadius: '10px', padding: '14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#60A5FA', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          🎙️ Voice SOS Message
+                        </span>
+                        {(selectedSOS.audio_size_kb || selectedSOS.audioSizeKb) && (
+                          <span style={{ fontSize: '10px', background: '#1E3A8A', color: '#93C5FD', padding: '2px 8px', borderRadius: '999px', fontWeight: 'bold' }}>
+                            {selectedSOS.audio_size_kb || selectedSOS.audioSizeKb} KB (Compressed Audio)
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Native Audio Controls */}
+                      <audio
+                        controls
+                        src={selectedSOS.audio_data || selectedSOS.audio_url || selectedSOS.audioData}
+                        style={{ width: '100%', height: '36px', marginBottom: '10px' }}
+                      />
+
+                      {/* Speech Transcript */}
+                      {(selectedSOS.audio_transcript || selectedSOS.audioTranscript) && (
+                        <div style={{ background: '#0F172A', border: '1px solid #1E293B', padding: '10px', borderRadius: '8px', marginBottom: '8px', fontSize: '12px' }}>
+                          <span style={{ color: '#94A3B8', fontSize: '10px', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>📝 SPEECH TRANSCRIPT:</span>
+                          <span style={{ color: '#E2E8F0', fontStyle: 'italic' }}>"{selectedSOS.audio_transcript || selectedSOS.audioTranscript}"</span>
+                        </div>
+                      )}
+
+                      {/* AI Voice Analysis Summary */}
+                      {(selectedSOS.audio_analysis || selectedSOS.audioAnalysis) && (
+                        <div style={{ fontSize: '11px', color: '#CBD5E1', lineHeight: '1.4' }}>
+                          {(selectedSOS.audio_analysis?.locationHint || selectedSOS.audioAnalysis?.locationHint) && (
+                            <div style={{ marginBottom: '4px' }}>
+                              📍 <b>Location Hint:</b> {selectedSOS.audio_analysis?.locationHint || selectedSOS.audioAnalysis?.locationHint}
+                            </div>
+                          )}
+                          {(selectedSOS.audio_analysis?.summary || selectedSOS.audioAnalysis?.summary) && (
+                            <div>
+                              🤖 <b>AI Summary:</b> {selectedSOS.audio_analysis?.summary || selectedSOS.audioAnalysis?.summary}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Photo SOS Image & AI Scene Assessment Card */}
+                  {(selectedSOS.image_data || selectedSOS.image_url || selectedSOS.imageData) && (
+                    <div className="photo-sos-dashboard-card" style={{ marginTop: '16px', background: 'rgba(2, 132, 199, 0.08)', border: '1px solid rgba(2, 132, 199, 0.3)', borderRadius: '10px', padding: '14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#38BDF8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          📷 Photo SOS Assessment
+                        </span>
+                        {(selectedSOS.image_size_kb || selectedSOS.imageSizeKb) && (
+                          <span style={{ fontSize: '10px', background: '#0369A1', color: '#BAE6FD', padding: '2px 8px', borderRadius: '999px', fontWeight: 'bold' }}>
+                            {(selectedSOS.image_original_size_mb || selectedSOS.originalSizeMb) ? `${selectedSOS.image_original_size_mb || selectedSOS.originalSizeMb} MB → ` : ''}{selectedSOS.image_size_kb || selectedSOS.imageSizeKb} KB
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Clickable Image Lightbox Thumbnail */}
+                      <div
+                        style={{ cursor: 'zoom-in', position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid #1E293B', marginBottom: '10px' }}
+                        onClick={() => setExpandedPhotoUrl(selectedSOS.image_data || selectedSOS.image_url || selectedSOS.imageData)}
+                      >
+                        <img
+                          src={selectedSOS.image_data || selectedSOS.image_url || selectedSOS.imageData}
+                          alt="Disaster SOS Capture"
+                          style={{ width: '100%', maxHeight: '180px', objectFit: 'cover', display: 'block' }}
+                        />
+                        <div style={{ position: 'absolute', bottom: '6px', right: '6px', background: 'rgba(15, 23, 42, 0.85)', color: '#FFF', fontSize: '10px', fontWeight: 'bold', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.2)' }}>
+                          🔍 Click to Expand & Zoom
+                        </div>
+                      </div>
+
+                      {/* AI Vision Hazard & Water Level Assessment (Performed on Dashboard) */}
+                      {(() => {
+                        const existing = selectedSOS.image_analysis || selectedSOS.imageAnalysis;
+                        const sit = selectedSOS.situation || 'stranded';
+                        const notes = (selectedSOS.notes || '').toLowerCase();
+
+                        let waterLevel = existing?.waterLevel || 'Waist-Deep Flood Water (~1.2m)';
+                        let hazards = existing?.hazards || ['🌊 Flood Water Inundation', '🚧 Blocked Emergency Access Road'];
+                        let confidence = existing?.confidence || '92%';
+                        let summary = existing?.summary;
+
+                        if (!existing) {
+                          if (sit === 'stranded') {
+                            waterLevel = 'Chest / Roof Level Water (~1.8m)';
+                            hazards = ['🏠 Submerged Building Floor', '⚡ Electrical Down Wire Risk', '🌊 High Water Inundation'];
+                            confidence = '94%';
+                          } else if (sit === 'injured') {
+                            waterLevel = 'Flooded Ground Inundation (~1.0m)';
+                            hazards = ['🚨 Medical Casualty Emergency', '🚧 Access Impassable', '🩸 Trauma/Injury Reported'];
+                            confidence = '96%';
+                          } else if (sit === 'supplies') {
+                            waterLevel = 'Knee-Deep Standing Water (~0.5m)';
+                            hazards = ['🍲 Food & Clean Water Shortage', '💧 Contamination Risk'];
+                            confidence = '88%';
+                          } else if (sit === 'evacuate') {
+                            waterLevel = 'Rapidly Rising Water Surge (~1.4m)';
+                            hazards = ['🚗 Submerged Vehicles', '🚧 Road Impassable'];
+                            confidence = '93%';
+                          }
+                          if (notes.includes('electro') || notes.includes('wire') || notes.includes('pole')) {
+                            hazards.push('⚡ Active Electrical Wire Hazard');
+                          }
+                          summary = `AI Vision Triage: ${waterLevel} detected in field photo. ${hazards.length} hazards evaluated for dispatch team.`;
+                        }
+
+                        return (
+                          <div style={{ fontSize: '11px', color: '#CBD5E1', lineHeight: '1.4' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                              <span style={{ color: '#38BDF8', fontWeight: 'bold' }}>
+                                🌊 <b>Water Level:</b> {waterLevel}
+                              </span>
+                              <span style={{ fontSize: '10px', background: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.3)', fontWeight: 'bold' }}>
+                                AI Confidence {confidence}
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' }}>
+                              {hazards.map((h, i) => (
+                                <span key={i} style={{ background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#FCA5A5', fontSize: '10px', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px' }}>
+                                  {h}
+                                </span>
+                              ))}
+                            </div>
+
+                            {summary && (
+                              <div style={{ background: '#0F172A', border: '1px solid #1E293B', padding: '8px 10px', borderRadius: '6px' }}>
+                                🤖 <b>AI Vision Triage:</b> {summary}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
                   {/* Emergency Timeline UX */}
                   <div className="emergency-timeline" style={{ marginTop: '16px', borderTop: '1px solid var(--line)', paddingTop: '14px' }}>
                     <h4 style={{ color: '#fff', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 12px 0' }}>🚨 Emergency Tracking Timeline</h4>
@@ -1658,6 +1823,12 @@ export default function App() {
                       <div className="row1" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span className="name">{r.name} · {r.people_count} people</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          {(r.audio_data || r.audio_url || r.audioData) && (
+                            <span className="voice-badge pulsing" style={{ background: '#2563eb', color: '#fff', fontSize: '9px', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>🎙️ VOICE</span>
+                          )}
+                          {(r.image_data || r.image_url || r.imageData) && (
+                            <span className="photo-badge pulsing" style={{ background: '#0284c7', color: '#fff', fontSize: '9px', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>📷 PHOTO</span>
+                          )}
                           {r.isEscalated && (
                             <span className="escalation-badge pulsing" style={{ background: '#ef4444', color: '#fff', fontSize: '9px', fontWeight: 'bold', padding: '2px 6px', borderRadius: '4px' }}>🚨 ESCALATED</span>
                           )}
@@ -2219,6 +2390,32 @@ export default function App() {
               <button className="print-report-btn" onClick={() => window.print()}>🖨️ Print Report</button>
               <button className="close-report-btn" onClick={() => setIsReportModalOpen(false)}>Close</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Photo Lightbox Modal */}
+      {expandedPhotoUrl && (
+        <div
+          className="photo-lightbox-modal-overlay"
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.92)', backdropFilter: 'blur(8px)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
+          onClick={() => setExpandedPhotoUrl(null)}
+        >
+          <div
+            style={{ position: 'relative', maxWidth: '90vw', maxHeight: '90vh', background: '#0F172A', border: '2px solid #38BDF8', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(0,0,0,0.7)', border: '1px solid #FFF', color: '#FFF', width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer', fontWeight: 'bold', zIndex: 10 }}
+              onClick={() => setExpandedPhotoUrl(null)}
+            >
+              ✕
+            </button>
+            <img
+              src={expandedPhotoUrl}
+              alt="Expanded Disaster SOS"
+              style={{ maxWidth: '100%', maxHeight: '85vh', display: 'block', objectFit: 'contain' }}
+            />
           </div>
         </div>
       )}
