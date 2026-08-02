@@ -1,141 +1,170 @@
-# Raahat — Disaster Command Center & SOS Platform
+# Raahat — Enterprise Disaster Command Center & SOS Ecosystem
 
-Raahat is an offline-first, real-time disaster command center and SOS routing system designed to connect citizens in flood zones with rescue teams and emergency resources on the ground.
-
-## 🚨 Phase 6 - Live Situation Overview
-The responder dashboard now includes a live command-center overview that summarizes the current disaster posture at a glance. It surfaces deterministic metrics from the active Firestore/demo data, including overall risk, active and critical SOS counts, estimated affected people, active emergency clusters, medical emergencies, hospital capacity, shelter capacity, and available rescue resources. An AI-generated summary is also shown alongside the metrics so responders can quickly assess the situation without leaving the dashboard.
-
-### How to test it
-1. Start the dashboard with `cd dashboard && npm run dev`.
-2. Sign in as the demo responder (or use your configured Firebase responder account) and wait for the dashboard to load.
-3. Confirm the new Live Situation Overview card appears in the command-center sidebar and updates as SOS requests, hospitals, shelters, and resources change.
-4. Open the report modal to verify the RAAHAT SITREP generation flow still works.
+**Raahat** is an enterprise-grade, multi-app disaster management ecosystem connecting citizens in distress, government command centers, and field rescue responder units during extreme weather and flood events.
 
 ---
 
-## 🏗️ Architecture Overview
+## 🌐 Live Deployed Applications (Firebase Multi-Site Hosting)
 
-The system consists of the following components:
-1. **Citizen App (`citizen-app/`)**: React + Vite Progressive Web App (PWA) with a form to capture name, phone number, headcount, situation, notes, and GPS coordinates.
-2. **Offline-first Queue (IndexedDB)**: If a citizen has no cellular network or internet access, distress calls are stored locally in IndexedDB and automatically synchronized with Firestore once signal returns.
-3. **Firestore Database (`firebase/firestore.rules`)**: A cloud-based real-time database storing SOS requests and command center data.
-4. **AI Auto-Triage (`firebase/functions/`)**: A Firebase Cloud Function triggered on new SOS submissions. It calls the Anthropic API (Claude 3.5 Haiku) to read citizen notes and classify the incident's priority (`critical` / `high` / `normal`), generate flags, and summarize the notes.
-5. **RAAHAT Command Decision Engine**:
-   - **AI Situation Summary**: Analyzes aggregate metrics (Active/Critical SOS, beds, shelters, resources) to compile overall severity ratings, focus areas, and recommended command actions.
-   - **Deterministic Recommendation matching**: Selects eligible Hospitals (operational, beds > 0), Shelters (occupancy < capacity), and Resources (available, matching resource type based on incident situation) using weighted mathematical models, then queries Claude to explain the match.
-   - **SITREP Situation Report**: Generates structured, print-ready disaster logs and administrative summaries in Markdown.
-6. **Responder Command Center Dashboard (`dashboard/`)**: A React + Vite dashboard displaying:
-   - **Floating Summary Cards**: Floating overlay stats tracking Active SOS, Critical SOS, Available Resources, Bed Availability, Shelter capacity, and dynamic disaster severity rating.
-   - **Master-Detail SOS Coordinator Panel**: Click on an SOS request to inspect headcount, situation, notes, and the **RAAHAT AI Recommendation Panel** (with score progress bars, resource matching, and AI explainers).
-   - **Sidebar Tabs**: Toggles between the **SOS Request Queue** and **Infrastructure Directory**.
-   - **Emergency Cluster Detection**: Uses deterministic geospatial distance calculations to group nearby SOS requests into possible larger incidents, showing cluster location, number of SOS, critical count, estimated people affected, and priority on both the sidebar and the map.
-   - **Interactive Map**: Plotting CircleMarkers for SOS requests, hospitals, shelters, resource types, and emergency clusters using Leaflet and OpenStreetMap.
-7. **Authentication & Authorization**: Firebase Authentication secures the Command Center. Public citizens can submit alerts anonymously, but only authenticated responders can read lists/details, coordinate dispatch, or modify emergency resources.
+| Application | Description | Live Deployment URL | Firebase Site ID |
+| :--- | :--- | :--- | :--- |
+| 🏡 **Landing Portal** | Central entry portal for platform navigation | [raahat-home.web.app](https://raahat-home.web.app) | `raahat-home` |
+| 🚨 **Citizen SOS PWA** | Progressive Web App for citizens in distress | [raahat-citizen.web.app](https://raahat-citizen.web.app) | `raahat-citizen` |
+| 🏛️ **Command Dashboard** | Government Disaster Command Center | [raahat-dashboard.web.app](https://raahat-dashboard.web.app) | `raahat-dashboard` |
+---
+
+## 🔑 Login Credentials
+
+| Application Portal | Email Address | Password |
+| :--- | :--- | :--- |
+| 🏛️ **Command Dashboard** | `bala@gamil.com` | `Balakirshna` |
+| 🚒 **Rescue Team Dashboard** | `test_admin@raahat.org` | `password123` |
 
 ---
 
-## 🧠 AI Recommendation & Scoring Models
+## 🏗️ Architecture & Component System
 
-To ensure safety and reliability, recommendations rely on **deterministic selection first, AI explanation second**. The LLM never invents capacity or performs automated dispatch:
+The platform is structured into 4 decoupled applications built on top of a unified enterprise design language inspired by Ant Design Pro, Vercel, and Grafana:
 
-### 1. Hospital Matching
-- **Eligibility**: `status` !== 'Closed' and `availableBeds` > 0.
-- **Formula**:
-  $$Score = \left(\frac{AvailableBeds}{TotalBeds}\right) \times 0.4 + \left(\frac{1}{Distance + 0.01}\right) \times 0.6$$
+### 1. Unified `AppLayout` Shell Architecture
+- **Fixed Left Sidebar**: `90px` width (`72px` collapsed), fixed position, zero movement on content scroll.
+- **Sticky Top Header**: `64px` height sticky header bar with brand title, live status badge, and user authentication actions.
+- **Scrollable Content Container**: `width: 100%`, `height: calc(100vh - 64px)`, `padding: 24px`, `overflow-y: auto`, `overflow-x: hidden`. Every sub-page scrolls independently inside `<main className="layout-content-area">`.
+- **Zero Horizontal Overflow**: Fluid CSS Grid system supporting screen resolutions from 480px mobile to 1920px 4K displays.
 
-### 2. Shelter Matching
-- **Eligibility**: `available` capacity > 0.
-- **Formula**:
-  $$Score = \left(\frac{AvailableCapacity}{TotalCapacity}\right) \times 0.4 + \left(\frac{1}{Distance + 0.01}\right) \times 0.6$$
+### 2. 12-Column CSS Grid System
+- **Master Grid**: `display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 24px;`
+- **Dashboard Home**:
+  - **KPI Stats Row**: `grid-column: span 12` with auto-fit `repeat(auto-fit, minmax(210px, 1fr))` stat cards.
+  - **High-Res Satellite Map**: `grid-column: span 8` (`height: 520px`, `border-radius: 16px`) with Google Maps Satellite hybrid tile layer, emergency pulse markers, and floating map legend.
+  - **Emergency SOS Queue Panel**: `grid-column: span 4` (`height: 520px`, `border-radius: 16px`) with search filter, status pills, and scrollable prioritized incident cards.
+  - **Bottom Analytics Row**: 3 equal cards `grid-column: span 4` each (Live Activity Timeline, Resource Overview, Recent Disaster Alerts).
 
-### 3. Resource Matching (Transparent Weighted Scoring)
-- **Eligibility**: `availability` === 'available'.
-- **Situation Matching Weight**:
-  - Stranded/Evacuate -> Boat (1.0), Rescue Team (0.8), Fire Truck (0.6)
-  - Injured -> Ambulance (1.0), Rescue Team (0.7), Volunteer (0.5)
-  - Supplies -> Volunteer (1.0), Fire Truck (0.6)
-- **Formula**:
-  $$Score = (TypeWeight \times 0.6) + \left(\frac{1}{Distance + 0.01} \times 0.4\right)$$
-
----
-
-## 🔒 Security Model & Firestore Rules
-
-To protect citizens' data while keeping emergency reporting accessible, Raahat implements a zero-trust model for anonymous clients:
-- **Citizen SOS Creation**: Anyone (anonymous) can create a new request:
-  `allow create: if true;`
-- **Responder Reads & Updates**: Only authenticated users can read lists/details or mark individuals dispatched/rescued:
-  `allow read, update: if request.auth != null;`
-- **Command Center Directory**: Security rules restrict access to responder-only information (`hospitals`, `shelters`, `resources`):
-  `allow read, write: if request.auth != null;`
+### 3. Dedicated Sub-Page Directory Views
+- **Incidents Operations Center (`/incidents`)**: Full-page incident queue with search, status filters, and priority sorting.
+- **Infrastructure Directory (`/infrastructure`)**: Monitored Hospitals, Relief Shelters, Police Posts, Fire Stations, and Weather Radar Units arranged in a responsive auto-fit grid (`repeat(auto-fit, minmax(360px, 1fr))`) with facility registration modals.
+- **Predictive Flood Telemetry (`/risk_prediction`)**: Real-time Open-Meteo precipitation & river discharge telemetry with Gemini AI public flood warnings.
+- **Rescue Resource Allocation (`/resources`)**: Allocation status for NDRF squads, rescue boats, ambulances, and volunteers.
 
 ---
 
-## 🛠️ Installation & Setup
+## ⚡ Key Features
 
-### 1. Set Up Firebase Project (5 minutes)
+### 🚨 Prioritized Emergency SOS Queue
+- **AI Priority Ranking**: Critical & Escalated distress calls (`injured`, `stranded`, structural danger) automatically float to the **very top of the queue**.
+- **Newest Timestamp Sorting**: Secondary sorting arranges requests chronologically by submission time.
+- **Rich Incident Cards**: Displays victim name, headcount, category badge, AI summary, GPS coordinates `📍`, contact phone `📞`, hazard chips (`🔴 STRUCTURAL DANGER`), and media attachment badges (`📷 PHOTO ATTACHED`, `🎙️ VOICE SOS`).
 
-1. Create a project in the [Firebase Console](https://console.firebase.google.com/).
-2. Enable **Firestore Database** in **Test Mode** (rules will be uploaded via CLI).
-3. Enable **Firebase Authentication** and turn on **Email/Password** provider under Sign-in methods.
-4. Add a **Web App** under Project Settings and copy your Firebase configuration keys.
+### 🌊 Predictive Flood Early-Warning Telemetry
+- **Open-Meteo Forecast Telemetry**: Fetches 48h peak precipitation (mm) and 72h river discharge ($m^3/s$) for disaster sectors.
+- **Automated Risk Engine**: 3-hour background job evaluates deterministic flood risk levels (`SEVERE`, `ELEVATED`, `NORMAL`).
+- **Gemini AI Plain-Language Warnings**: Calls Gemini API to turn raw meteorological telemetry into actionable public warning advisories.
 
-### 2. Configure Environment Files
+### 🧠 Deterministic Resource Recommendation Engine
+- **Hospital Matching**: Evaluates operational status and bed availability:
+  $$\text{Score} = \left(\frac{\text{AvailableBeds}}{\text{TotalBeds}}\right) \times 0.4 + \left(\frac{1}{\text{Distance} + 0.01}\right) \times 0.6$$
+- **Shelter Matching**: Evaluates shelter capacity:
+  $$\text{Score} = \left(\frac{\text{AvailableCapacity}}{\text{TotalCapacity}}\right) \times 0.4 + \left(\frac{1}{\text{Distance} + 0.01}\right) \times 0.6$$
 
-Create `.env.local` files for both frontends with your Firebase keys:
+---
 
-#### In `citizen-app/.env.local` & `dashboard/.env.local`:
-```env
-VITE_FIREBASE_API_KEY=your-api-key
-VITE_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your-project-id
-VITE_FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
-VITE_FIREBASE_MESSAGING_SENDER_ID=your-sender-id
-VITE_FIREBASE_APP_ID=your-app-id
-```
+## 🛠️ Local Development & Build Commands
 
-### 3. Deploy Firestore Rules & Cloud Functions
-
-1. Install the Firebase CLI: `npm install -g firebase-tools`
-2. Log in and configure your project: `firebase login`
-3. Configure the Anthropic Claude API key for the Cloud Function:
-   ```bash
-   firebase functions:secrets:set ANTHROPIC_API_KEY=your_claude_api_key_here
-   ```
-4. Deploy rules and functions from the `firebase/` directory:
-   ```bash
-   cd firebase
-   firebase deploy
-   ```
-
-### 4. Run the Citizen App Locally
+### 1. Clone & Install Dependencies
 
 ```bash
-cd citizen-app
-npm install
-npm run dev
+# Install Citizen App
+cd citizen-app && npm install
+
+# Install Responder Dashboard
+cd ../dashboard && npm install
+
+# Install Rescue Team Dashboard
+cd ../rescue-dashboard && npm install
 ```
 
-### 5. Run the Responder Dashboard Locally
+### 2. Run Applications Locally
 
 ```bash
-cd dashboard
-npm install
-npm run dev
+# Run Citizen SOS App (Port 5173)
+cd citizen-app && npm run dev
+
+# Run Command Center Dashboard (Port 5174)
+cd dashboard && npm run dev
+
+# Run Rescue Team Dashboard (Port 5175)
+cd rescue-dashboard && npm run dev
 ```
-*(Note: If Firebase config environment variables are not found, the dashboard defaults to **Offline Demo Mode** with mock data and auto-authenticated demo credentials. In real Firebase mode, if the database collections `hospitals`, `shelters`, or `resources` are detected to be empty upon logging in, the app will automatically seed them with simulation datasets in the background. If Cloud Functions are not deployed, the dashboard intercepts the network exception and executes the client-side fallback decision engine seamlessly).*
+
+### 3. Build for Production
+
+```bash
+# Build Citizen App
+cd citizen-app && npm run build
+
+# Build Command Dashboard
+cd ../dashboard && npm run build
+
+# Build Rescue Dashboard
+cd ../rescue-dashboard && npm run build
+```
+
+---
+
+## 🚀 Deployment (Firebase Multi-Site Hosting)
+
+To deploy specific sites or all sites together using Firebase CLI:
+
+```bash
+# Deploy Landing Portal only
+firebase deploy --only hosting:raahat-home
+
+# Deploy Citizen SOS PWA only
+firebase deploy --only hosting:raahat-citizen
+
+# Deploy Command Dashboard only
+firebase deploy --only hosting:raahat-dashboard
+
+# Deploy Rescue Team Dashboard only
+firebase deploy --only hosting:raahat-rescue
+
+# Deploy ALL sites & Cloud Functions simultaneously
+firebase deploy
+```
 
 ---
 
 ## 📂 Project Structure
 
-- [citizen-app/](file:///C:/Synergy/citizen-app) — Citizen PWA code
-  - [src/App.jsx](file:///C:/Synergy/citizen-app/src/App.jsx) — Form, offline queue UI, and Firestore submission
-  - [src/db.js](file:///C:/Synergy/citizen-app/src/db.js) — Local IndexedDB helper functions
-  - [src/firebaseClient.js](file:///C:/Synergy/citizen-app/src/firebaseClient.js) — Firebase initialization
-- [dashboard/](file:///C:/Synergy/dashboard) — Responder command center code
-  - [src/App.jsx](file:///C:/Synergy/dashboard/src/App.jsx) — Master-Detail SOS coordinator, AI recommendations explainer, weighted scoring, tab panels, and overlay stats.
-  - [src/firebaseClient.js](file:///C:/Synergy/dashboard/src/firebaseClient.js) — Firebase configuration & Auth export
-- [firebase/](file:///C:/Synergy/firebase) — Firebase setup
-  - [firestore.rules](file:///C:/Synergy/firebase/firestore.rules) — Access rules for requests, hospitals, shelters, and resources
-  - [functions/index.js](file:///C:/Synergy/firebase/functions/index.js) — Claude AI Triage, Decision Summary, Recommendations Explainer, and SITREP Report Generator
+```
+flood-sos-react/
+├── landing/                   # Minimal static landing portal (raahat-home.web.app)
+│   ├── index.html
+│   └── styles.css
+├── citizen-app/               # Citizen Distress PWA (raahat-citizen.web.app)
+│   ├── src/App.jsx
+│   ├── src/db.js              # Offline-first IndexedDB storage
+│   └── src/styles.css
+├── dashboard/                 # Command Center Dashboard (raahat-dashboard.web.app)
+│   ├── src/App.jsx
+│   ├── src/components/
+│   │   ├── layout/AppLayout.jsx
+│   │   ├── ui/ (StatCard, IncidentCard, FacilityCard)
+│   │   └── pages/ (DashboardHome, InfrastructurePage, RiskPredictionPage, IncidentsPage)
+│   └── src/styles.css         # Master CSS Grid & Design Tokens
+├── rescue-dashboard/          # Field Responder Portal (raahat-rescue.web.app)
+│   ├── src/App.jsx
+│   └── src/styles.css
+├── firebase/                  # Firebase Backend Infrastructure
+│   ├── firestore.rules
+│   └── functions/index.js     # AI Triage & Flood Early-Warning Functions
+├── firebase.json              # Multi-site hosting configuration
+└── .firebaserc                # Firebase project mapping
+```
+
+---
+
+## 🔒 Security Model
+
+- **Anonymous Citizen SOS Broadcaster**: Anyone can submit emergency SOS requests (`allow create: if true;`).
+- **Authenticated Command Center & Field Teams**: Only authenticated responders can read distress details, update incident status (`dispatched`, `rescued`), or modify resource availability (`allow read, write: if request.auth != null;`).

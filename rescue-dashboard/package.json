@@ -1,25 +1,23 @@
 {
-  "name": "raahat-dashboard",
+  "name": "raahat-rescue-dashboard",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "test": "node --test src/overviewMetrics.test.js"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",
-    "antd": "^6.5.3",
-    "firebase": "^12.17.0",
-    "leaflet": "^1.9.4",
+    "firebase": "^10.13.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-leaflet": "^4.2.1"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.8"
+    "vite": "^5.4.1"
   }
 }

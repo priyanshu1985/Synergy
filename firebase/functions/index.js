@@ -10,7 +10,9 @@
 
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
+const { findBestResourceMatch } = require('./resourceMatching');
 
 admin.initializeApp();
 
@@ -109,15 +111,51 @@ exports.autoTriageSOS = onDocumentCreated(
       const raw = await callGemini(apiKey, TRIAGE_SYSTEM_PROMPT, userContent, 300);
       const parsed = JSON.parse(raw);
 
-      await snapshot.ref.update({
-        ai_priority: parsed.priority || 'normal',
-        ai_flags: parsed.flags || [],
-        ai_summary: parsed.summary || '',
-        ai_processed_at: new Date().toISOString(),
-        ai_engine: 'gemini-2.0-flash'
-      });
+      const aiPriority = parsed.priority || 'normal';
+      const aiFlags = parsed.flags || [];
+      const aiSummary = parsed.summary || '';
+      const nowStr = new Date().toISOString();
 
-      console.log(`Triaged ${event.params.requestId} → ${parsed.priority} (Gemini)`);
+      const updatePayload = {
+        ai_priority: aiPriority,
+        ai_flags: aiFlags,
+        ai_summary: aiSummary,
+        ai_processed_at: nowStr,
+        ai_engine: 'gemini-2.0-flash'
+      };
+
+      // Query available resources from Firestore to perform automatic assignment
+      const db = admin.firestore();
+      const resSnap = await db.collection('resources').get();
+      const availableResources = [];
+      resSnap.forEach((d) => availableResources.push({ id: d.id, ...d.data() }));
+
+      const { resource: bestRes } = findBestResourceMatch(
+        { ...data, ai_priority: aiPriority, ai_flags: aiFlags },
+        availableResources
+      );
+
+      if (bestRes) {
+        updatePayload.assigned_resource_id = bestRes.id || bestRes.name;
+        updatePayload.assigned_resource_name = bestRes.name;
+        updatePayload.assigned_at = nowStr;
+        updatePayload.status = 'team_assigned';
+
+        // Update matched resource status to busy
+        try {
+          if (bestRes.id) {
+            await db.collection('resources').doc(bestRes.id).update({
+              availability: 'busy',
+              status: `Dispatched to rescue ${data.name || 'citizen'}`
+            });
+          }
+        } catch (resErr) {
+          console.warn('Resource status update failed during auto-assignment:', resErr.message);
+        }
+      }
+
+      await snapshot.ref.update(updatePayload);
+      console.log(`Triaged ${event.params.requestId} → ${aiPriority} (Assigned: ${bestRes ? bestRes.name : 'None'})`);
     } catch (err) {
       console.error('AI triage error:', err.message);
     }
@@ -240,3 +278,166 @@ Use professional command-center terminology. Write in Markdown. Output ONLY the 
     }
   }
 );
+
+// ─── 5. Predictive Flood Early-Warning Backend Job ──────────────────────────
+// Configurable threshold defaults (adjustable)
+const PRECIP_ELEVATED = 15;   // 15mm 2-day forecast
+const PRECIP_SEVERE = 40;     // 40mm 2-day forecast
+const DISCHARGE_ELEVATED = 50; // 50 m³/s river discharge
+const DISCHARGE_SEVERE = 120;  // 120 m³/s river discharge
+
+/**
+ * Pure deterministic risk classifier based on Open-Meteo forecast data.
+ */
+function classifyFloodRisk(precipMax, dischargeMax, dischargeTrendingUp) {
+  if (precipMax >= PRECIP_SEVERE || dischargeMax >= DISCHARGE_SEVERE) {
+    return 'severe';
+  }
+  if (precipMax >= PRECIP_ELEVATED || dischargeMax >= DISCHARGE_ELEVATED || (dischargeMax > 30 && dischargeTrendingUp)) {
+    return 'elevated';
+  }
+  return 'normal';
+}
+
+exports.checkFloodRisk = onSchedule(
+  { schedule: 'every 3 hours', secrets: ['GEMINI_API_KEY'] },
+  async (event) => {
+    console.log('Running checkFloodRisk scheduled backend job...');
+    const db = admin.firestore();
+
+    // 1. Gather monitored zones from existing Firestore collections (hospitals, shelters, resources)
+    const monitoredZones = [];
+    try {
+      const [hospSnap, sheltSnap, resSnap] = await Promise.all([
+        db.collection('hospitals').get(),
+        db.collection('shelters').get(),
+        db.collection('resources').get()
+      ]);
+
+      const seenCoords = new Set();
+      const addZone = (id, name, lat, lng, type) => {
+        if (!lat || !lng) return;
+        const coordKey = `${Number(lat).toFixed(3)},${Number(lng).toFixed(3)}`;
+        if (seenCoords.has(coordKey)) return;
+        seenCoords.add(coordKey);
+        monitoredZones.push({
+          id: id || name.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+          name: name || 'Monitored Zone',
+          lat: Number(lat),
+          lng: Number(lng),
+          type
+        });
+      };
+
+      hospSnap.forEach(d => {
+        const data = d.data();
+        addZone(d.id, data.name, data.latitude || data.lat, data.longitude || data.lng, 'hospital');
+      });
+      sheltSnap.forEach(d => {
+        const data = d.data();
+        addZone(d.id, data.name, data.latitude || data.lat, data.longitude || data.lng, 'shelter');
+      });
+      resSnap.forEach(d => {
+        const data = d.data();
+        addZone(d.id, data.name, data.latitude || data.lat, data.longitude || data.lng, 'resource');
+      });
+    } catch (err) {
+      console.error('Error fetching monitored infrastructure from Firestore:', err.message);
+    }
+
+    // Fallback default zones if Firestore infrastructure is empty
+    if (monitoredZones.length === 0) {
+      monitoredZones.push(
+        { id: 'zone_kurla_east', name: 'Kurla East Sector', lat: 20.5933, lng: 78.9628, type: 'general' },
+        { id: 'zone_north_station', name: 'North Station Sector', lat: 20.6020, lng: 78.9750, type: 'general' },
+        { id: 'zone_river_basin', name: 'Central River Basin', lat: 20.5850, lng: 78.9550, type: 'general' }
+      );
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    const nowStr = new Date().toISOString();
+
+    // 2. Fetch Open-Meteo forecasts for each zone & evaluate risk
+    for (const zone of monitoredZones) {
+      let precipMax = 0;
+      let dischargeMax = 0;
+      let dischargeTrendingUp = false;
+
+      try {
+        // Fetch weather / precipitation forecast
+        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${zone.lat}&longitude=${zone.lng}&hourly=precipitation&forecast_days=2`;
+        const weatherRes = await fetch(weatherUrl);
+        if (weatherRes.ok) {
+          const weatherData = await weatherRes.json();
+          const precipArray = weatherData.hourly?.precipitation || [];
+          if (precipArray.length > 0) {
+            precipMax = Math.max(...precipArray);
+          }
+        }
+
+        // Fetch flood / river discharge forecast
+        const floodUrl = `https://flood-api.open-meteo.com/v1/flood?latitude=${zone.lat}&longitude=${zone.lng}&daily=river_discharge&forecast_days=3`;
+        const floodRes = await fetch(floodUrl);
+        if (floodRes.ok) {
+          const floodData = await floodRes.json();
+          const dischargeArray = floodData.daily?.river_discharge || [];
+          if (dischargeArray.length > 0) {
+            dischargeMax = Math.max(...dischargeArray.filter(v => typeof v === 'number'));
+            if (dischargeArray.length >= 2) {
+              dischargeTrendingUp = dischargeArray[dischargeArray.length - 1] > dischargeArray[0];
+            }
+          }
+        }
+      } catch (apiErr) {
+        console.warn(`Open-Meteo API fetch error for ${zone.name}:`, apiErr.message);
+      }
+
+      // 3. Apply pure deterministic risk classifier
+      const riskLevel = classifyFloodRisk(precipMax, dischargeMax, dischargeTrendingUp);
+      let aiWarningText = '';
+
+      // 4. Generate AI plain-language warning for elevated/severe zones
+      if ((riskLevel === 'elevated' || riskLevel === 'severe') && apiKey) {
+        const systemPrompt = `You are the RAAHAT Disaster Early Warning Specialist.
+Given forecast numbers for a monitored zone, output ONLY a 2-3 sentence clear, objective public flood warning.
+State the zone name, cited peak precipitation (mm) or river discharge (m³/s), and recommended precautionary action.
+Do NOT invent fake locations or details not provided. Output plain text only.`;
+
+        const userPrompt = `Zone: ${zone.name}\nCoordinates: ${zone.lat}, ${zone.lng}\nCalculated Risk Level: ${riskLevel.toUpperCase()}\nPeak 48h Precipitation: ${precipMax.toFixed(1)} mm\nPeak 72h River Discharge: ${dischargeMax.toFixed(1)} m³/s\nDischarge Trending Up: ${dischargeTrendingUp}`;
+
+        try {
+          aiWarningText = await callGemini(apiKey, systemPrompt, userPrompt, 200);
+        } catch (aiErr) {
+          console.warn(`AI warning generation failed for ${zone.name}:`, aiErr.message);
+          aiWarningText = `ALERT (${riskLevel.toUpperCase()}): Flood forecast indicates peak precipitation of ${precipMax.toFixed(1)}mm and river discharge of ${dischargeMax.toFixed(1)} m³/s in ${zone.name}. Please stay vigilant and monitor emergency channels.`;
+        }
+      } else if (riskLevel === 'normal') {
+        aiWarningText = `Conditions normal for ${zone.name}. Peak forecast precipitation: ${precipMax.toFixed(1)}mm, river discharge: ${dischargeMax.toFixed(1)} m³/s.`;
+      }
+
+      // 5. Overwrite/update deterministic doc in flood_warnings collection
+      const docId = `zone_${zone.id || zone.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+      try {
+        await db.collection('flood_warnings').doc(docId).set({
+          zone_id: docId,
+          zone_name: zone.name,
+          lat: zone.lat,
+          lng: zone.lng,
+          zone_type: zone.type,
+          risk_level: riskLevel,
+          raw_forecast: {
+            precip_max_mm: Number(precipMax.toFixed(1)),
+            discharge_max_m3s: Number(dischargeMax.toFixed(1)),
+            discharge_trending_up: dischargeTrendingUp
+          },
+          ai_warning_text: aiWarningText,
+          updated_at: nowStr
+        }, { merge: true });
+        console.log(`Updated flood warning for ${zone.name}: ${riskLevel}`);
+      } catch (writeErr) {
+        console.error(`Error saving flood warning doc for ${zone.name}:`, writeErr.message);
+      }
+    }
+  }
+);
+
