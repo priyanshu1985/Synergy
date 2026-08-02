@@ -18,7 +18,7 @@
 | Application Portal | Email Address | Password |
 | :--- | :--- | :--- |
 | 🏛️ **Command Dashboard** | `bala@gamil.com` | `Balakirshna` |
-| 🚒 **Rescue Team Dashboard** | `test_admin@raahat.org` | `password123` |
+| 🚒 **Rescue Team Dashboard** | `bala@gamil.com` | `Balakirshna` |
 
 ---
 
